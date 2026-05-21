@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 export default function Home() {
   const [question, setQuestion] = useState('');
@@ -24,25 +25,10 @@ export default function Home() {
     setLoading(false);
   };
 
-  const formatAnswer = (text: string) => {
-    return text
-      .split('\n')
-      .map((line, i) => {
-        if (line.startsWith('# ')) return <h1 key={i} className="text-2xl font-bold text-amber-400 mt-6 mb-3">{line.slice(2)}</h1>;
-        if (line.startsWith('## ')) return <h2 key={i} className="text-xl font-bold text-amber-300 mt-5 mb-2">{line.slice(3)}</h2>;
-        if (line.startsWith('### ')) return <h3 key={i} className="text-lg font-bold text-amber-200 mt-4 mb-2">{line.slice(4)}</h3>;
-        if (line.startsWith('---')) return <hr key={i} className="border-slate-600 my-4"/>;
-        if (line.startsWith('- ') || line.startsWith('• ')) return <li key={i} className="text-slate-200 mr-4 mb-1 list-disc">{line.slice(2)}</li>;
-        if (line.match(/^\|.*\|$/)) return <p key={i} className="text-slate-300 font-mono text-sm my-1 bg-slate-800 px-3 py-1 rounded">{line}</p>;
-        if (line.trim() === '') return <br key={i}/>;
-        return <p key={i} className="text-slate-200 mb-2 leading-relaxed"
-          dangerouslySetInnerHTML={{__html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-bold">$1</strong>')}}
-        />;
-      });
-  };
-
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+
+      {/* Navbar */}
       <nav className="flex justify-between items-center px-8 py-4 border-b border-slate-700">
         <h1 className="text-2xl font-bold text-white">⚖️ Hukumx <span className="text-amber-400">حكمx</span></h1>
         <div className="flex gap-4">
@@ -51,6 +37,7 @@ export default function Home() {
         </div>
       </nav>
 
+      {/* Hero */}
       <div className="flex flex-col items-center px-4 py-16">
         <h2 className="text-5xl font-bold text-white mb-4 text-center">
           استشارتك القانونية<br/>
@@ -60,6 +47,7 @@ export default function Home() {
           احصل على استشارة قانونية فورية، أو تواصل مع محامي متخصص
         </p>
 
+        {/* Search Box */}
         <div className="w-full max-w-2xl bg-slate-700 rounded-2xl p-4 flex gap-3 shadow-xl">
           <input
             type="text"
@@ -87,26 +75,57 @@ export default function Home() {
           </button>
         </div>
 
+        {/* Loading Skeleton */}
         {loading && (
-          <div className="w-full max-w-2xl mt-8 bg-slate-700 rounded-2xl p-6 text-right animate-pulse">
-            <div className="h-4 bg-slate-600 rounded w-3/4 mr-auto mb-3"/>
+          <div className="w-full max-w-2xl mt-8 bg-slate-700 rounded-2xl p-6 animate-pulse">
+            <div className="h-4 bg-slate-600 rounded w-3/4 ml-auto mb-3"/>
             <div className="h-4 bg-slate-600 rounded w-full mb-3"/>
-            <div className="h-4 bg-slate-600 rounded w-5/6 mr-auto"/>
+            <div className="h-4 bg-slate-600 rounded w-5/6 ml-auto mb-3"/>
+            <div className="h-4 bg-slate-600 rounded w-4/5 ml-auto"/>
           </div>
         )}
 
+        {/* Answer Box */}
         {answer && !loading && (
-          <div className="w-full max-w-2xl mt-8 bg-slate-700 rounded-2xl p-6 text-right shadow-xl border border-slate-600" dir="rtl">
+          <div className="w-full max-w-2xl mt-8 bg-slate-700 rounded-2xl p-6 shadow-xl border border-slate-600" dir="rtl">
+            
+            {/* Header */}
             <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-600">
               <span className="text-amber-400 text-xl">⚖️</span>
               <h3 className="text-amber-400 font-bold text-lg">الاستشارة القانونية</h3>
             </div>
-            <div className="space-y-1">{formatAnswer(answer)}</div>
+
+            {/* Markdown Content */}
+            <ReactMarkdown
+              components={{
+                h1: ({children}) => <h1 className="text-2xl font-bold text-amber-400 mt-4 mb-2">{children}</h1>,
+                h2: ({children}) => <h2 className="text-xl font-bold text-amber-300 mt-4 mb-2">{children}</h2>,
+                h3: ({children}) => <h3 className="text-lg font-bold text-amber-200 mt-3 mb-1">{children}</h3>,
+                p: ({children}) => <p className="text-slate-200 mb-3 leading-relaxed">{children}</p>,
+                strong: ({children}) => <strong className="text-white font-bold">{children}</strong>,
+                ul: ({children}) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
+                ol: ({children}) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
+                li: ({children}) => <li className="text-slate-200">{children}</li>,
+                hr: () => <hr className="border-slate-600 my-4"/>,
+                table: ({children}) => (
+                  <div className="overflow-x-auto my-4">
+                    <table className="w-full border-collapse text-sm">{children}</table>
+                  </div>
+                ),
+                th: ({children}) => <th className="bg-slate-600 text-amber-300 px-3 py-2 border border-slate-500 text-right">{children}</th>,
+                td: ({children}) => <td className="text-slate-200 px-3 py-2 border border-slate-600">{children}</td>,
+                blockquote: ({children}) => <blockquote className="border-r-4 border-amber-400 pr-4 my-3 text-slate-300 italic">{children}</blockquote>,
+              }}
+            >
+              {answer}
+            </ReactMarkdown>
+
+            {/* Footer */}
             <div className="mt-6 pt-4 border-t border-slate-600 flex justify-between items-center">
-              <span className="text-slate-400 text-sm">⚠️ هذه استشارة أولية — استشر محامياً متخصصاً</span>
+              <span className="text-slate-400 text-sm">⚠️ استشارة أولية — استشر محامياً متخصصاً</span>
               <button
-                onClick={() => {navigator.clipboard.writeText(answer)}}
-                className="text-slate-400 hover:text-white text-sm flex items-center gap-1"
+                onClick={() => navigator.clipboard.writeText(answer)}
+                className="text-slate-400 hover:text-white text-sm transition-colors"
               >
                 نسخ 📋
               </button>
