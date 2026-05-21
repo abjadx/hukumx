@@ -1,3 +1,4 @@
+
 'use client';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -5,20 +6,25 @@ import ReactMarkdown from 'react-markdown';
 export default function Home() {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const askQuestion = async () => {
-    if (!question.trim()) return;
+  const askQuestion = async (q?: string) => {
+    const finalQuestion = q || question;
+    if (!finalQuestion.trim()) return;
+    setQuestion(finalQuestion);
     setLoading(true);
     setAnswer('');
+    setSuggestions([]);
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question: finalQuestion }),
       });
       const data = await res.json();
       setAnswer(data.answer);
+      setSuggestions(data.suggestions || []);
     } catch {
       setAnswer('حدث خطأ، حاول مرة أخرى');
     }
@@ -37,7 +43,6 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Hero */}
       <div className="flex flex-col items-center px-4 py-16">
         <h2 className="text-5xl font-bold text-white mb-4 text-center">
           استشارتك القانونية<br/>
@@ -59,7 +64,7 @@ export default function Home() {
             dir="rtl"
           />
           <button
-            onClick={askQuestion}
+            onClick={() => askQuestion()}
             disabled={loading}
             className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-bold px-8 py-3 rounded-xl transition-all"
           >
@@ -88,14 +93,11 @@ export default function Home() {
         {/* Answer Box */}
         {answer && !loading && (
           <div className="w-full max-w-2xl mt-8 bg-slate-700 rounded-2xl p-6 shadow-xl border border-slate-600" dir="rtl">
-            
-            {/* Header */}
             <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-600">
               <span className="text-amber-400 text-xl">⚖️</span>
               <h3 className="text-amber-400 font-bold text-lg">الاستشارة القانونية</h3>
             </div>
 
-            {/* Markdown Content */}
             <ReactMarkdown
               components={{
                 h1: ({children}) => <h1 className="text-2xl font-bold text-amber-400 mt-4 mb-2">{children}</h1>,
@@ -114,13 +116,11 @@ export default function Home() {
                 ),
                 th: ({children}) => <th className="bg-slate-600 text-amber-300 px-3 py-2 border border-slate-500 text-right">{children}</th>,
                 td: ({children}) => <td className="text-slate-200 px-3 py-2 border border-slate-600">{children}</td>,
-                blockquote: ({children}) => <blockquote className="border-r-4 border-amber-400 pr-4 my-3 text-slate-300 italic">{children}</blockquote>,
               }}
             >
               {answer}
             </ReactMarkdown>
 
-            {/* Footer */}
             <div className="mt-6 pt-4 border-t border-slate-600 flex justify-between items-center">
               <span className="text-slate-400 text-sm">⚠️ استشارة أولية — استشر محامياً متخصصاً</span>
               <button
@@ -132,6 +132,25 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* Dynamic Suggested Questions */}
+        {suggestions.length > 0 && !loading && (
+          <div className="w-full max-w-2xl mt-6" dir="rtl">
+            <p className="text-slate-400 text-sm mb-3">🤔 أسئلة مقترحة بناءً على استشارتك:</p>
+            <div className="flex flex-col gap-2">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => askQuestion(s)}
+                  className="bg-slate-700 hover:bg-amber-500 hover:text-black text-slate-300 text-sm px-4 py-3 rounded-xl border border-slate-600 hover:border-amber-400 transition-all text-right"
+                >
+                  {s} ←
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
       </div>
     </main>
   );
