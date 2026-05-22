@@ -138,11 +138,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Validate question
-    const { question } = body;
+    const { question, country, caseType } = body;
 
-    if (!question || typeof question !== 'string') {
+    if (!question || typeof question !== 'string' || !country || !caseType) {
       return NextResponse.json(
-        { error: 'يرجى كتابة سؤالك القانوني' },
+        { error: 'يرجى اختيار الدولة ونوع القضية وكتابة سؤالك' },
         { status: 400 }
       );
     }
@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'user',
-          content: trimmed,
+          content: `الدولة: ${country}\nنوع القضية: ${caseType}\nالسؤال: ${trimmed}`,
         }
       ],
     });

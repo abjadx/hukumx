@@ -35,14 +35,7 @@ export default function Home() {
     const finalQuestion = q || question;
     if (!finalQuestion.trim()) return;
 
-    const selectedCountry = COUNTRIES.find(c => c.code === country);
-    const selectedCase = CASE_TYPES.find(c => c.code === caseType);
-
-    const fullQuestion = [
-      selectedCountry ? `الدولة: ${selectedCountry.name}` : '',
-      selectedCase ? `نوع القضية: ${selectedCase.name}` : '',
-      `السؤال: ${finalQuestion}`,
-    ].filter(Boolean).join('\n');
+  
 
     setQuestion(finalQuestion);
     setLoading(true);
@@ -53,7 +46,11 @@ export default function Home() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: fullQuestion }),
+        body: JSON.stringify({
+  question: finalQuestion,
+  country: COUNTRIES.find(c => c.code === country)?.name || 'غير محدد',
+  caseType: CASE_TYPES.find(c => c.code === caseType)?.name || 'غير محدد',
+}),
       });
       const data = await res.json();
 
