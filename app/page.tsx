@@ -30,12 +30,23 @@ export default function Home() {
   const [answer, setAnswer] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState('');
 
   const askQuestion = async (q?: string) => {
     const finalQuestion = q || question;
     if (!finalQuestion.trim()) return;
 
-  
+    setFormError('');
+
+    if (!country) {
+      setFormError('يرجى اختيار الدولة أولاً 👆');
+      return;
+    }
+
+    if (!caseType) {
+      setFormError('يرجى اختيار نوع القضية أولاً 👆');
+      return;
+    }
 
     setQuestion(finalQuestion);
     setLoading(true);
@@ -47,10 +58,10 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-  question: finalQuestion,
-  country: COUNTRIES.find(c => c.code === country)?.name || 'غير محدد',
-  caseType: CASE_TYPES.find(c => c.code === caseType)?.name || 'غير محدد',
-}),
+          question: finalQuestion,
+          country: COUNTRIES.find(c => c.code === country)?.name || 'غير محدد',
+          caseType: CASE_TYPES.find(c => c.code === caseType)?.name || 'غير محدد',
+        }),
       });
       const data = await res.json();
 
@@ -92,7 +103,7 @@ export default function Home() {
         <div className="w-full max-w-2xl space-y-4">
 
           {/* Step 1 - Country */}
-          <div className="bg-slate-700 rounded-2xl p-4" dir="rtl">
+          <div className={`bg-slate-700 rounded-2xl p-4 border-2 transition-all ${!country && formError.includes('الدولة') ? 'border-red-400' : 'border-transparent'}`} dir="rtl">
             <p className="text-slate-300 text-sm mb-3 font-medium">
               <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full ml-2">1</span>
               اختر الدولة
@@ -101,7 +112,7 @@ export default function Home() {
               {COUNTRIES.map(c => (
                 <button
                   key={c.code}
-                  onClick={() => setCountry(c.code)}
+                  onClick={() => { setCountry(c.code); setFormError(''); }}
                   className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
                     country === c.code
                       ? 'bg-amber-500 text-black border-amber-500'
@@ -115,7 +126,7 @@ export default function Home() {
           </div>
 
           {/* Step 2 - Case Type */}
-          <div className="bg-slate-700 rounded-2xl p-4" dir="rtl">
+          <div className={`bg-slate-700 rounded-2xl p-4 border-2 transition-all ${!caseType && formError.includes('القضية') ? 'border-red-400' : 'border-transparent'}`} dir="rtl">
             <p className="text-slate-300 text-sm mb-3 font-medium">
               <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full ml-2">2</span>
               نوع القضية
@@ -124,7 +135,7 @@ export default function Home() {
               {CASE_TYPES.map(c => (
                 <button
                   key={c.code}
-                  onClick={() => setCaseType(c.code)}
+                  onClick={() => { setCaseType(c.code); setFormError(''); }}
                   className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
                     caseType === c.code
                       ? 'bg-amber-500 text-black border-amber-500'
@@ -186,6 +197,16 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          {/* Form Error */}
+          {formError && (
+            <div dir="rtl">
+              <p className="text-red-400 text-sm text-right bg-red-400/10 border border-red-400/30 px-4 py-3 rounded-xl">
+                ⚠️ {formError}
+              </p>
+            </div>
+          )}
+
         </div>
 
         {/* Loading Skeleton */}
