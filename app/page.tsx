@@ -93,11 +93,12 @@ export default function Home() {
 
       <div className="flex flex-col items-center px-4 py-12">
         <h2 className="text-5xl font-bold text-white mb-4 text-center">
-          استشارتك القانونية<br/>
-          <span className="text-amber-400">بالذكاء الاصطناعي</span>
+          Hukumx<br/>
+          <span className="text-amber-400">مساعدك القانوني الذكي</span>
         </h2>
+
         <p className="text-slate-300 text-xl mb-10 text-center max-w-2xl">
-          احصل على استشارة قانونية فورية، أو تواصل مع محامي متخصص
+           افهم موقفك القانوني، صنّف حالتك، واعرف الخطوات المناسبة قبل التواصل مع محامٍ مختص.
         </p>
 
         <div className="w-full max-w-2xl space-y-4">
@@ -289,4 +290,4 @@ export default function Home() {
       </div>
     </main>
   );
-}
+} 
