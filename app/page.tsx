@@ -1,9 +1,31 @@
-
 'use client';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
+const COUNTRIES = [
+  { code: 'JO', name: 'الأردن', flag: '🇯🇴' },
+  { code: 'SA', name: 'السعودية', flag: '🇸🇦' },
+  { code: 'AE', name: 'الإمارات', flag: '🇦🇪' },
+  { code: 'EG', name: 'مصر', flag: '🇪🇬' },
+  { code: 'IQ', name: 'العراق', flag: '🇮🇶' },
+  { code: 'OTHER', name: 'دولة أخرى', flag: '🌍' },
+];
+
+const CASE_TYPES = [
+  { code: 'work', name: 'عمل وموظفين', icon: '💼' },
+  { code: 'rent', name: 'إيجارات وعقارات', icon: '🏠' },
+  { code: 'company', name: 'شركات وعقود', icon: '🏢' },
+  { code: 'family', name: 'أحوال شخصية', icon: '👨‍👩‍👧' },
+  { code: 'financial', name: 'مطالبات مالية', icon: '💰' },
+  { code: 'criminal', name: 'قضايا جزائية', icon: '⚖️' },
+  { code: 'digital', name: 'جرائم إلكترونية', icon: '💻' },
+  { code: 'ip', name: 'ملكية فكرية', icon: '📋' },
+  { code: 'other', name: 'أخرى', icon: '❓' },
+];
+
 export default function Home() {
+  const [country, setCountry] = useState('');
+  const [caseType, setCaseType] = useState('');
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -12,15 +34,26 @@ export default function Home() {
   const askQuestion = async (q?: string) => {
     const finalQuestion = q || question;
     if (!finalQuestion.trim()) return;
+
+    const selectedCountry = COUNTRIES.find(c => c.code === country);
+    const selectedCase = CASE_TYPES.find(c => c.code === caseType);
+
+    const fullQuestion = [
+      selectedCountry ? `الدولة: ${selectedCountry.name}` : '',
+      selectedCase ? `نوع القضية: ${selectedCase.name}` : '',
+      `السؤال: ${finalQuestion}`,
+    ].filter(Boolean).join('\n');
+
     setQuestion(finalQuestion);
     setLoading(true);
     setAnswer('');
     setSuggestions([]);
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: finalQuestion }),
+        body: JSON.stringify({ question: fullQuestion }),
       });
       const data = await res.json();
 
@@ -50,7 +83,7 @@ export default function Home() {
         </div>
       </nav>
 
-      <div className="flex flex-col items-center px-4 py-16">
+      <div className="flex flex-col items-center px-4 py-12">
         <h2 className="text-5xl font-bold text-white mb-4 text-center">
           استشارتك القانونية<br/>
           <span className="text-amber-400">بالذكاء الاصطناعي</span>
@@ -59,37 +92,108 @@ export default function Home() {
           احصل على استشارة قانونية فورية، أو تواصل مع محامي متخصص
         </p>
 
-        {/* Search Box */}
-        <div className="w-full max-w-2xl bg-slate-700 rounded-2xl p-4 flex gap-3 shadow-xl">
-          <input
-            type="text"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && askQuestion()}
-            placeholder="اكتب سؤالك القانوني هنا..."
-            className="flex-1 bg-transparent text-white placeholder-slate-400 outline-none text-right text-lg px-2"
-            dir="rtl"
-          />
-          <button
-            onClick={() => askQuestion()}
-            disabled={loading}
-            className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-bold px-8 py-3 rounded-xl transition-all"
-          >
-            {loading ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                جاري...
-              </span>
-            ) : 'اسأل ⚖️'}
-          </button>
+        <div className="w-full max-w-2xl space-y-4">
+
+          {/* Step 1 - Country */}
+          <div className="bg-slate-700 rounded-2xl p-4" dir="rtl">
+            <p className="text-slate-300 text-sm mb-3 font-medium">
+              <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full ml-2">1</span>
+              اختر الدولة
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {COUNTRIES.map(c => (
+                <button
+                  key={c.code}
+                  onClick={() => setCountry(c.code)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                    country === c.code
+                      ? 'bg-amber-500 text-black border-amber-500'
+                      : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400 hover:text-white'
+                  }`}
+                >
+                  {c.flag} {c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Step 2 - Case Type */}
+          <div className="bg-slate-700 rounded-2xl p-4" dir="rtl">
+            <p className="text-slate-300 text-sm mb-3 font-medium">
+              <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full ml-2">2</span>
+              نوع القضية
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {CASE_TYPES.map(c => (
+                <button
+                  key={c.code}
+                  onClick={() => setCaseType(c.code)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                    caseType === c.code
+                      ? 'bg-amber-500 text-black border-amber-500'
+                      : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400 hover:text-white'
+                  }`}
+                >
+                  {c.icon} {c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Step 3 - Question */}
+          <div className="bg-slate-700 rounded-2xl p-4" dir="rtl">
+            <p className="text-slate-300 text-sm mb-3 font-medium">
+              <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full ml-2">3</span>
+              اكتب سؤالك القانوني
+            </p>
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && askQuestion()}
+                placeholder="مثال: ما هي حقوقي إذا فُصلت من العمل بدون سبب؟"
+                className="flex-1 bg-slate-600 text-white placeholder-slate-400 outline-none text-right text-base px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 transition-all"
+                dir="rtl"
+              />
+              <button
+                onClick={() => askQuestion()}
+                disabled={loading}
+                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-bold px-6 py-3 rounded-xl transition-all whitespace-nowrap"
+              >
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    جاري...
+                  </span>
+                ) : 'اسأل ⚖️'}
+              </button>
+            </div>
+
+            {/* Selected filters display */}
+            {(country || caseType) && (
+              <div className="flex gap-2 mt-3 flex-wrap">
+                {country && (
+                  <span className="text-xs bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full border border-amber-500/30">
+                    {COUNTRIES.find(c => c.code === country)?.flag} {COUNTRIES.find(c => c.code === country)?.name}
+                  </span>
+                )}
+                {caseType && (
+                  <span className="text-xs bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full border border-amber-500/30">
+                    {CASE_TYPES.find(c => c.code === caseType)?.icon} {CASE_TYPES.find(c => c.code === caseType)?.name}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Loading Skeleton */}
         {loading && (
-          <div className="w-full max-w-2xl mt-8 bg-slate-700 rounded-2xl p-6 animate-pulse">
+          <div className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 animate-pulse">
             <div className="h-4 bg-slate-600 rounded w-3/4 ml-auto mb-3"/>
             <div className="h-4 bg-slate-600 rounded w-full mb-3"/>
             <div className="h-4 bg-slate-600 rounded w-5/6 ml-auto mb-3"/>
@@ -99,10 +203,15 @@ export default function Home() {
 
         {/* Answer Box */}
         {answer && !loading && (
-          <div className="w-full max-w-2xl mt-8 bg-slate-700 rounded-2xl p-6 shadow-xl border border-slate-600" dir="rtl">
+          <div className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 shadow-xl border border-slate-600" dir="rtl">
             <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-600">
               <span className="text-amber-400 text-xl">⚖️</span>
               <h3 className="text-amber-400 font-bold text-lg">الاستشارة القانونية</h3>
+              {country && (
+                <span className="mr-auto text-xs bg-slate-600 text-slate-300 px-2 py-1 rounded-full">
+                  {COUNTRIES.find(c => c.code === country)?.flag} {COUNTRIES.find(c => c.code === country)?.name}
+                </span>
+              )}
             </div>
 
             <ReactMarkdown
@@ -116,6 +225,7 @@ export default function Home() {
                 ol: ({children}) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
                 li: ({children}) => <li className="text-slate-200">{children}</li>,
                 hr: () => <hr className="border-slate-600 my-4"/>,
+                blockquote: ({children}) => <blockquote className="border-r-4 border-amber-400 pr-4 my-3 text-slate-300 italic">{children}</blockquote>,
                 table: ({children}) => (
                   <div className="overflow-x-auto my-4">
                     <table className="w-full border-collapse text-sm">{children}</table>
@@ -140,9 +250,9 @@ export default function Home() {
           </div>
         )}
 
-        {/* Dynamic Suggested Questions */}
+        {/* Suggested Questions */}
         {suggestions.length > 0 && !loading && (
-          <div className="w-full max-w-2xl mt-6" dir="rtl">
+          <div className="w-full max-w-2xl mt-4" dir="rtl">
             <p className="text-slate-400 text-sm mb-3">🤔 أسئلة مقترحة بناءً على استشارتك:</p>
             <div className="flex flex-col gap-2">
               {suggestions.map((s, i) => (
