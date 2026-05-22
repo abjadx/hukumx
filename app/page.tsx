@@ -23,12 +23,19 @@ export default function Home() {
         body: JSON.stringify({ question: finalQuestion }),
       });
       const data = await res.json();
+
+      if (!res.ok) {
+        setAnswer(`> ⚠️ **${data.error || 'حدث خطأ'}**`);
+        return;
+      }
+
       setAnswer(data.answer);
       setSuggestions(data.suggestions || []);
     } catch {
-      setAnswer('حدث خطأ، حاول مرة أخرى');
+      setAnswer('> ⚠️ **تعذّر الاتصال بالخادم، تحقق من اتصالك بالإنترنت**');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

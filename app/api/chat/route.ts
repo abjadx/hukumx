@@ -127,30 +127,111 @@ const SYSTEM_PROMPT = `
 `;
 
 export async function POST(req: NextRequest) {
-  const { question } = await req.json();
+  try {
+    // 1. Parse body
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json(
+        { error: 'طلب غير صالح' },
+        { status: 400 }
+      );
+    }
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: question,
+    // 2. Validate question
+    const { question } = body;
+
+    if (!question || typeof question !== 'string') {
+      return NextResponse.json(
+        { error: 'يرجى كتابة سؤالك القانوني' },
+        { status: 400 }
+      );
+    }
+
+    const trimmed = question.trim();
+
+    if (trimmed.length === 0) {
+      return NextResponse.json(
+        { error: 'لا يمكن إرسال سؤال فارغ' },
+        { status: 400 }
+      );
+    }
+
+    if (trimmed.length < 5) {
+      return NextResponse.json(
+        { error: 'السؤال قصير جداً، يرجى توضيح استفسارك' },
+        { status: 400 }
+      );
+    }
+
+    if (trimmed.length > 2000) {
+      return NextResponse.json(
+        { error: 'السؤال طويل جداً، الحد الأقصى 2000 حرف' },
+        { status: 400 }
+      );
+    }
+
+    // 3. Call Claude API
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: trimmed,
+        }
+      ],
+    });
+
+    // 4. Parse response
+    const fullText = message.content[0].type === 'text'
+      ? message.content[0].text
+      : '';
+
+    if (!fullText) {
+      return NextResponse.json(
+        { error: 'لم نتمكن من توليد إجابة، حاول مرة أخرى' },
+        { status: 500 }
+      );
+    }
+
+    const parts = fullText.split('---SUGGESTED_QUESTIONS---');
+    const answer = parts[0].trim();
+
+    let suggestions: string[] = [];
+    if (parts[1]) {
+      const suggestionsText = parts[1].split('---END_SUGGESTED---')[0].trim();
+      suggestions = suggestionsText
+        .split('\n')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+        .slice(0, 3);
+    }
+
+    return NextResponse.json({ answer, suggestions });
+
+  } catch (error: unknown) {
+    console.error('Hukumx API Error:', error);
+
+    // Anthropic specific errors
+    if (error instanceof Error) {
+      if (error.message.includes('authentication')) {
+        return NextResponse.json(
+          { error: 'خطأ في الاتصال بالخدمة' },
+          { status: 500 }
+        );
       }
-    ],
-  });
+      if (error.message.includes('rate_limit')) {
+        return NextResponse.json(
+          { error: 'الخدمة مشغولة حالياً، حاول بعد لحظة' },
+          { status: 429 }
+        );
+      }
+    }
 
-  const fullText = message.content[0].type === 'text' ? message.content[0].text : '';
-
-  const parts = fullText.split('---SUGGESTED_QUESTIONS---');
-  const answer = parts[0].trim();
-
-  let suggestions: string[] = [];
-  if (parts[1]) {
-    const suggestionsText = parts[1].split('---END_SUGGESTED---')[0].trim();
-    suggestions = suggestionsText.split('\n').filter(s => s.trim()).slice(0, 3);
+    return NextResponse.json(
+      { error: 'حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ answer, suggestions });
 }
