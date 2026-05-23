@@ -2,87 +2,14 @@
 
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-
-const COUNTRIES = [
-  { code: 'JO', name: 'الأردن', flag: '🇯🇴' },
-  { code: 'SA', name: 'السعودية', flag: '🇸🇦' },
-  { code: 'AE', name: 'الإمارات', flag: '🇦🇪' },
-  { code: 'EG', name: 'مصر', flag: '🇪🇬' },
-  { code: 'IQ', name: 'العراق', flag: '🇮🇶' },
-  { code: 'OTHER', name: 'دولة أخرى', flag: '🌍' },
-];
-
-const CASE_TYPES = [
-  { code: 'work', name: 'عمل وموظفين', icon: '💼' },
-  { code: 'rent', name: 'إيجارات وعقارات', icon: '🏠' },
-  { code: 'company', name: 'شركات وعقود', icon: '🏢' },
-  { code: 'family', name: 'أحوال شخصية', icon: '👨‍👩‍👧' },
-  { code: 'financial', name: 'مطالبات مالية', icon: '💰' },
-  { code: 'criminal', name: 'قضايا جزائية', icon: '⚖️' },
-  { code: 'digital', name: 'جرائم إلكترونية', icon: '💻' },
-  { code: 'ip', name: 'ملكية فكرية', icon: '📋' },
-  { code: 'other', name: 'أخرى', icon: '❓' },
-];
-
-type IntakeType = 'judgmentAppeal' | 'contractsBusiness' | null;
-
-type JudgmentIntakeData = {
-  verdictType: string;
-  appearanceType: string;
-  notificationStatus: string;
-  notificationDate: string;
-  court: string;
-  role: string;
-  hasExecution: string;
-  hasJudgmentCopy: string;
-  details: string;
-};
-
-type ContractIntakeData = {
-  contractType: string;
-  userRole: string;
-  hasWrittenContract: string;
-  isSigned: string;
-  mainIssue: string;
-  hasMoney: string;
-  moneyDetails: string;
-  hasPenaltyClause: string;
-  hasDuration: string;
-  durationDetails: string;
-  hasJurisdictionClause: string;
-  hasIpOrConfidentiality: string;
-  stage: string;
-  details: string;
-};
-
-const EMPTY_JUDGMENT_INTAKE: JudgmentIntakeData = {
-  verdictType: '',
-  appearanceType: '',
-  notificationStatus: '',
-  notificationDate: '',
-  court: '',
-  role: '',
-  hasExecution: '',
-  hasJudgmentCopy: '',
-  details: '',
-};
-
-const EMPTY_CONTRACT_INTAKE: ContractIntakeData = {
-  contractType: '',
-  userRole: '',
-  hasWrittenContract: '',
-  isSigned: '',
-  mainIssue: '',
-  hasMoney: '',
-  moneyDetails: '',
-  hasPenaltyClause: '',
-  hasDuration: '',
-  durationDetails: '',
-  hasJurisdictionClause: '',
-  hasIpOrConfidentiality: '',
-  stage: '',
-  details: '',
-};
+import { COUNTRIES, CASE_TYPES } from './data/legal-options';
+import {
+  ContractIntakeData,
+  EMPTY_CONTRACT_INTAKE,
+  EMPTY_JUDGMENT_INTAKE,
+  IntakeType,
+  JudgmentIntakeData,
+} from './types/legal';
 
 export default function Home() {
   const [country, setCountry] = useState('');
@@ -866,26 +793,30 @@ export default function Home() {
                   هل يوجد عقد مكتوب؟ <span className="text-red-400">*</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {['نعم', 'لا', 'مسودة فقط', 'محادثات واتساب / إيميل فقط', 'لا أعرف'].map(
-                    (status) => (
-                      <button
-                        key={status}
-                        onClick={() =>
-                          setContractIntakeData((p) => ({
-                            ...p,
-                            hasWrittenContract: status,
-                          }))
-                        }
-                        className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                          contractIntakeData.hasWrittenContract === status
-                            ? 'bg-amber-500 text-black border-amber-500'
-                            : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
-                        }`}
-                      >
-                        {status}
-                      </button>
-                    )
-                  )}
+                  {[
+                    'نعم',
+                    'لا',
+                    'مسودة فقط',
+                    'محادثات واتساب / إيميل فقط',
+                    'لا أعرف',
+                  ].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          hasWrittenContract: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.hasWrittenContract === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -894,26 +825,30 @@ export default function Home() {
                   هل تم توقيع العقد؟ <span className="text-red-400">*</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {['نعم', 'لا', 'توقيع إلكتروني', 'تم الاتفاق شفهيًا', 'لا أعرف'].map(
-                    (status) => (
-                      <button
-                        key={status}
-                        onClick={() =>
-                          setContractIntakeData((p) => ({
-                            ...p,
-                            isSigned: status,
-                          }))
-                        }
-                        className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                          contractIntakeData.isSigned === status
-                            ? 'bg-amber-500 text-black border-amber-500'
-                            : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
-                        }`}
-                      >
-                        {status}
-                      </button>
-                    )
-                  )}
+                  {[
+                    'نعم',
+                    'لا',
+                    'توقيع إلكتروني',
+                    'تم الاتفاق شفهيًا',
+                    'لا أعرف',
+                  ].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          isSigned: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.isSigned === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -1113,26 +1048,29 @@ export default function Home() {
                   <span className="text-red-400">*</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {['قبل التوقيع', 'بعد التوقيع', 'حدث خلاف بالفعل', 'لا أعرف'].map(
-                    (stage) => (
-                      <button
-                        key={stage}
-                        onClick={() =>
-                          setContractIntakeData((p) => ({
-                            ...p,
-                            stage,
-                          }))
-                        }
-                        className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                          contractIntakeData.stage === stage
-                            ? 'bg-amber-500 text-black border-amber-500'
-                            : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
-                        }`}
-                      >
-                        {stage}
-                      </button>
-                    )
-                  )}
+                  {[
+                    'قبل التوقيع',
+                    'بعد التوقيع',
+                    'حدث خلاف بالفعل',
+                    'لا أعرف',
+                  ].map((stage) => (
+                    <button
+                      key={stage}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          stage,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.stage === stage
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {stage}
+                    </button>
+                  ))}
                 </div>
               </div>
 
