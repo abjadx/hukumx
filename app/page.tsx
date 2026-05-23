@@ -466,6 +466,12 @@ export default function Home() {
                   }
                   className="w-full bg-slate-600 text-white px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 outline-none transition-all"
                 />
+                {intakeData.notificationStatus === 'نعم، تم تبليغي' &&
+                  !intakeData.notificationDate && (
+                    <p className="mt-2 text-amber-300 text-sm bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 leading-relaxed">
+                      ⚠️ تاريخ التبليغ مهم جدًا لحساب مدة الطعن. أدخله إن كان متوفرًا.
+                    </p>
+                  )}
               </div>
 
               {/* المحكمة */}

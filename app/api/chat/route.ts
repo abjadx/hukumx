@@ -258,9 +258,6 @@ function normalizeText(value: unknown): string | null {
   return value.trim();
 }
 
-function isInvalidSelection(value: string | null): value is null {
-  return !value || value === 'غير محدد';
-}
 
 function isJudgmentOrAppealQuestion(question: string) {
   const keywords = [
