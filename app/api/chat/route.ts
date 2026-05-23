@@ -6,6 +6,8 @@ const openai = new OpenAI({
 });
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1';
+const JORDAN_LAWS_VECTOR_STORE_ID =
+  process.env.OPENAI_VECTOR_STORE_JORDAN_LAWS;
 
 const MAX_QUESTION_LENGTH = 2000;
 const MAX_CONTEXT_FIELD_LENGTH = 120;
@@ -154,6 +156,19 @@ const SYSTEM_PROMPT = `
 
 في قسم "تنبيه مهم" اكتب دائمًا:
 "هذه إجابة إرشادية أولية وليست استشارة قانونية نهائية. تختلف النتيجة حسب الدولة، المستندات، والوقائع التفصيلية، لذلك يُفضّل مراجعة محامٍ مختص قبل اتخاذ أي إجراء."
+
+====================
+الاعتماد على المصادر القانونية
+====================
+
+إذا توفرت مصادر قانونية مسترجعة من قاعدة القوانين، يجب الاعتماد عليها عند ذكر أي مادة قانونية أو مدة طعن أو إجراء محدد.
+
+قواعد إلزامية:
+- لا تذكر رقم مادة أو مدة قانونية أو إجراء محدد على أنه مؤكد إلا إذا كان مدعومًا من النصوص القانونية المسترجعة.
+- إذا لم تجد في المصادر نصًا كافيًا، قل بوضوح: "لا تحتوي قاعدة المصادر الحالية على نص كافٍ لتأكيد الإجابة بدقة."
+- لا تخترع مواد أو أرقام قوانين أو مددًا.
+- إذا تعارضت معرفة النموذج العامة مع النصوص المسترجعة، اعتمد على النصوص المسترجعة.
+- حتى عند وجود نص مسترجع، ابقَ حذرًا لأن التطبيق العملي قد يعتمد على نوع الحكم، طريقة صدوره، تاريخ التبليغ، العطل الرسمية، ووقائع الملف.
 
 ====================
 صيغة الإخراج الإلزامية
@@ -615,6 +630,13 @@ export async function POST(req: NextRequest) {
       `السؤال: ${question}`,
     ];
 
+    if (country === 'الأردن' && JORDAN_LAWS_VECTOR_STORE_ID) {
+      contentParts.push('');
+      contentParts.push(
+        'ملاحظة مهمة: توجد قاعدة مصادر قانونية أردنية مرتبطة بهذا الطلب. استخدم أداة file_search للبحث داخل قانون أصول المحاكمات المدنية الأردني عند الإجابة عن المدد، التبليغ، الاستئناف، الطعن، الاختصاص، والإجراءات.'
+      );
+    }
+
     if (normalizedJudgmentIntake) {
       contentParts.push('');
       contentParts.push('تفاصيل نموذج الحكم أو الاستئناف:');
@@ -701,12 +723,25 @@ export async function POST(req: NextRequest) {
         'تعامل مع هذه الحالة كمسألة عقود وشركات. لا تجزم بصحة العقد أو بطلان البند. ركّز على المخاطر، البنود الواجب مراجعتها، الخطوات العملية، وما يجب عرضه على محامٍ قبل التوقيع أو الفسخ أو المطالبة.'
       );
     }
+    const shouldUseJordanLegalSources =
+      country === 'الأردن' && Boolean(JORDAN_LAWS_VECTOR_STORE_ID);
 
     const response = await openai.responses.create({
       model: OPENAI_MODEL,
       instructions: SYSTEM_PROMPT,
       input: contentParts.join('\n'),
       max_output_tokens: 2400,
+      ...(shouldUseJordanLegalSources
+        ? {
+            tools: [
+              {
+                type: 'file_search' as const,
+                vector_store_ids: [JORDAN_LAWS_VECTOR_STORE_ID as string],
+                max_num_results: 6,
+              },
+            ],
+          }
+        : {}),
       text: {
         format: {
           type: 'json_schema',
