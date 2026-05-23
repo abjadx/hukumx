@@ -24,7 +24,9 @@ const CASE_TYPES = [
   { code: 'other', name: 'أخرى', icon: '❓' },
 ];
 
-type IntakeData = {
+type IntakeType = 'judgmentAppeal' | 'contractsBusiness' | null;
+
+type JudgmentIntakeData = {
   verdictType: string;
   appearanceType: string;
   notificationStatus: string;
@@ -36,7 +38,24 @@ type IntakeData = {
   details: string;
 };
 
-const EMPTY_INTAKE: IntakeData = {
+type ContractIntakeData = {
+  contractType: string;
+  userRole: string;
+  hasWrittenContract: string;
+  isSigned: string;
+  mainIssue: string;
+  hasMoney: string;
+  moneyDetails: string;
+  hasPenaltyClause: string;
+  hasDuration: string;
+  durationDetails: string;
+  hasJurisdictionClause: string;
+  hasIpOrConfidentiality: string;
+  stage: string;
+  details: string;
+};
+
+const EMPTY_JUDGMENT_INTAKE: JudgmentIntakeData = {
   verdictType: '',
   appearanceType: '',
   notificationStatus: '',
@@ -45,6 +64,23 @@ const EMPTY_INTAKE: IntakeData = {
   role: '',
   hasExecution: '',
   hasJudgmentCopy: '',
+  details: '',
+};
+
+const EMPTY_CONTRACT_INTAKE: ContractIntakeData = {
+  contractType: '',
+  userRole: '',
+  hasWrittenContract: '',
+  isSigned: '',
+  mainIssue: '',
+  hasMoney: '',
+  moneyDetails: '',
+  hasPenaltyClause: '',
+  hasDuration: '',
+  durationDetails: '',
+  hasJurisdictionClause: '',
+  hasIpOrConfidentiality: '',
+  stage: '',
   details: '',
 };
 
@@ -57,23 +93,48 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
-  const [showIntake, setShowIntake] = useState(false);
+  const [intakeType, setIntakeType] = useState<IntakeType>(null);
+  const [activeAnswerIntakeType, setActiveAnswerIntakeType] =
+    useState<IntakeType>(null);
   const [pendingQuestion, setPendingQuestion] = useState('');
-  const [intakeData, setIntakeData] = useState<IntakeData>(EMPTY_INTAKE);
+
+  const [judgmentIntakeData, setJudgmentIntakeData] =
+    useState<JudgmentIntakeData>(EMPTY_JUDGMENT_INTAKE);
+
+  const [contractIntakeData, setContractIntakeData] =
+    useState<ContractIntakeData>(EMPTY_CONTRACT_INTAKE);
 
   const selectedCountry = COUNTRIES.find((c) => c.code === country);
   const selectedCaseType = CASE_TYPES.find((c) => c.code === caseType);
 
-  const hasIntakeData =
-    intakeData.verdictType ||
-    intakeData.appearanceType ||
-    intakeData.notificationStatus ||
-    intakeData.notificationDate ||
-    intakeData.court ||
-    intakeData.role ||
-    intakeData.hasExecution ||
-    intakeData.hasJudgmentCopy ||
-    intakeData.details;
+  const hasJudgmentIntakeData =
+    judgmentIntakeData.verdictType ||
+    judgmentIntakeData.appearanceType ||
+    judgmentIntakeData.notificationStatus ||
+    judgmentIntakeData.notificationDate ||
+    judgmentIntakeData.court ||
+    judgmentIntakeData.role ||
+    judgmentIntakeData.hasExecution ||
+    judgmentIntakeData.hasJudgmentCopy ||
+    judgmentIntakeData.details;
+
+  const hasContractIntakeData =
+    contractIntakeData.contractType ||
+    contractIntakeData.userRole ||
+    contractIntakeData.hasWrittenContract ||
+    contractIntakeData.isSigned ||
+    contractIntakeData.mainIssue ||
+    contractIntakeData.hasMoney ||
+    contractIntakeData.moneyDetails ||
+    contractIntakeData.hasPenaltyClause ||
+    contractIntakeData.hasDuration ||
+    contractIntakeData.durationDetails ||
+    contractIntakeData.hasJurisdictionClause ||
+    contractIntakeData.hasIpOrConfidentiality ||
+    contractIntakeData.stage ||
+    contractIntakeData.details;
+
+  const hasAnyIntakeData = hasJudgmentIntakeData || hasContractIntakeData;
 
   const startNewQuestion = () => {
     setCountry('');
@@ -83,22 +144,32 @@ export default function Home() {
     setSuggestions([]);
     setLoading(false);
     setFormError('');
-    setShowIntake(false);
+    setIntakeType(null);
+    setActiveAnswerIntakeType(null);
     setPendingQuestion('');
-    setIntakeData(EMPTY_INTAKE);
+    setJudgmentIntakeData(EMPTY_JUDGMENT_INTAKE);
+    setContractIntakeData(EMPTY_CONTRACT_INTAKE);
   };
 
   const editIntakeDetails = () => {
     setAnswer('');
     setSuggestions([]);
-    setShowIntake(true);
+
+    if (activeAnswerIntakeType) {
+      setIntakeType(activeAnswerIntakeType);
+    }
 
     if (!pendingQuestion && question) {
       setPendingQuestion(question);
     }
   };
 
-  const askQuestion = async (q?: string, intake?: IntakeData) => {
+  const askQuestion = async (
+    q?: string,
+    submittedIntakeType?: IntakeType,
+    judgmentData?: JudgmentIntakeData | null,
+    contractData?: ContractIntakeData | null
+  ) => {
     const finalQuestion = q || question;
 
     if (!finalQuestion.trim()) {
@@ -121,7 +192,7 @@ export default function Home() {
     setLoading(true);
     setAnswer('');
     setSuggestions([]);
-    setShowIntake(false);
+    setIntakeType(null);
 
     try {
       const res = await fetch('/api/chat', {
@@ -131,7 +202,9 @@ export default function Home() {
           question: finalQuestion,
           country: selectedCountry?.name || 'غير محدد',
           caseType: selectedCaseType?.name || 'غير محدد',
-          intakeData: intake || null,
+          intakeType: submittedIntakeType,
+          judgmentIntakeData: judgmentData || null,
+          contractIntakeData: contractData || null,
         }),
       });
 
@@ -144,14 +217,22 @@ export default function Home() {
 
       if (data.needsIntake) {
         setPendingQuestion(finalQuestion);
-        setIntakeData(EMPTY_INTAKE);
-        setShowIntake(true);
+
+        if (data.intakeType === 'judgmentAppeal') {
+          setJudgmentIntakeData(EMPTY_JUDGMENT_INTAKE);
+          setIntakeType('judgmentAppeal');
+        } else if (data.intakeType === 'contractsBusiness') {
+          setContractIntakeData(EMPTY_CONTRACT_INTAKE);
+          setIntakeType('contractsBusiness');
+        }
+
         return;
       }
 
       setQuestion(finalQuestion);
       setAnswer(data.answer || '');
       setSuggestions(data.suggestions || []);
+      setActiveAnswerIntakeType(submittedIntakeType || null);
     } catch {
       setAnswer('> ⚠️ **تعذّر الاتصال بالخادم، تحقق من اتصالك بالإنترنت**');
     } finally {
@@ -159,33 +240,60 @@ export default function Home() {
     }
   };
 
-  const submitIntake = () => {
+  const submitJudgmentIntake = () => {
     if (
-      !intakeData.verdictType ||
-      !intakeData.appearanceType ||
-      !intakeData.notificationStatus ||
-      !intakeData.court ||
-      !intakeData.role ||
-      !intakeData.hasExecution ||
-      !intakeData.hasJudgmentCopy
+      !judgmentIntakeData.verdictType ||
+      !judgmentIntakeData.appearanceType ||
+      !judgmentIntakeData.notificationStatus ||
+      !judgmentIntakeData.court ||
+      !judgmentIntakeData.role ||
+      !judgmentIntakeData.hasExecution ||
+      !judgmentIntakeData.hasJudgmentCopy
     ) {
       setFormError('يرجى تعبئة الحقول المطلوبة في نموذج الحكم أو الاستئناف');
       return;
     }
 
     setFormError('');
-    askQuestion(pendingQuestion, intakeData);
+    askQuestion(
+      pendingQuestion,
+      'judgmentAppeal',
+      judgmentIntakeData,
+      null
+    );
+  };
+
+  const submitContractIntake = () => {
+    if (
+      !contractIntakeData.contractType ||
+      !contractIntakeData.userRole ||
+      !contractIntakeData.hasWrittenContract ||
+      !contractIntakeData.isSigned ||
+      !contractIntakeData.mainIssue ||
+      !contractIntakeData.stage
+    ) {
+      setFormError('يرجى تعبئة الحقول المطلوبة في نموذج العقود والشركات');
+      return;
+    }
+
+    setFormError('');
+    askQuestion(
+      pendingQuestion,
+      'contractsBusiness',
+      null,
+      contractIntakeData
+    );
   };
 
   const cancelIntake = () => {
-    setShowIntake(false);
+    setIntakeType(null);
     setPendingQuestion('');
-    setIntakeData(EMPTY_INTAKE);
+    setJudgmentIntakeData(EMPTY_JUDGMENT_INTAKE);
+    setContractIntakeData(EMPTY_CONTRACT_INTAKE);
   };
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
-      {/* Navbar */}
       <nav className="flex justify-between items-center px-8 py-4 border-b border-slate-700">
         <h1 className="text-2xl font-bold text-white">
           ⚖️ Hukumx <span className="text-amber-400">حكمx</span>
@@ -202,7 +310,6 @@ export default function Home() {
       </nav>
 
       <div className="flex flex-col items-center px-4 py-12">
-        {/* Hero */}
         <h2 className="text-5xl font-bold text-white mb-4 text-center">
           Hukumx
           <br />
@@ -215,7 +322,6 @@ export default function Home() {
         </p>
 
         <div className="w-full max-w-2xl space-y-4">
-          {/* Step 1 - Country */}
           <div
             className={`bg-slate-700 rounded-2xl p-4 border-2 transition-all ${
               !country && formError.includes('الدولة')
@@ -251,7 +357,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Step 2 - Case Type */}
           <div
             className={`bg-slate-700 rounded-2xl p-4 border-2 transition-all ${
               !caseType && formError.includes('القضية')
@@ -287,7 +392,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Step 3 - Question */}
           <div className="bg-slate-700 rounded-2xl p-4" dir="rtl">
             <p className="text-slate-300 text-sm mb-3 font-medium">
               <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full ml-2">
@@ -302,7 +406,7 @@ export default function Home() {
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && askQuestion()}
-                placeholder="مثال: كم مدة الاستئناف بعد صدور حكم في قضية شيك؟"
+                placeholder="مثال: عندي عقد شراكة وفي خلاف على الأرباح، ماذا أفعل؟"
                 className="flex-1 bg-slate-600 text-white placeholder-slate-400 outline-none text-right text-base px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 transition-all"
                 dir="rtl"
               />
@@ -341,7 +445,6 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Selected filters */}
             {(country || caseType) && (
               <div className="flex gap-2 mt-3 flex-wrap">
                 {country && (
@@ -359,7 +462,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* Form Error */}
           {formError && (
             <div dir="rtl">
               <p className="text-red-400 text-sm text-right bg-red-400/10 border border-red-400/30 px-4 py-3 rounded-xl">
@@ -369,8 +471,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Case Intake Form */}
-        {showIntake && !loading && (
+        {intakeType === 'judgmentAppeal' && !loading && (
           <div
             className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 border border-amber-500/50 shadow-xl"
             dir="rtl"
@@ -395,12 +496,10 @@ export default function Home() {
             )}
 
             <div className="space-y-5">
-              {/* نوع الحكم */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   نوع الحكم أو القرار <span className="text-red-400">*</span>
                 </label>
-
                 <div className="flex flex-wrap gap-2">
                   {[
                     'حكم ابتدائي',
@@ -413,10 +512,13 @@ export default function Home() {
                     <button
                       key={type}
                       onClick={() =>
-                        setIntakeData((p) => ({ ...p, verdictType: type }))
+                        setJudgmentIntakeData((p) => ({
+                          ...p,
+                          verdictType: type,
+                        }))
                       }
                       className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                        intakeData.verdictType === type
+                        judgmentIntakeData.verdictType === type
                           ? 'bg-amber-500 text-black border-amber-500'
                           : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
                       }`}
@@ -427,25 +529,23 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* طريقة صدور الحكم */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   طريقة صدور الحكم <span className="text-red-400">*</span>
                 </label>
-
                 <div className="flex flex-wrap gap-2">
                   {['وجاهي', 'غيابي', 'بمثابة الوجاهي', 'لا أعرف'].map(
                     (type) => (
                       <button
                         key={type}
                         onClick={() =>
-                          setIntakeData((p) => ({
+                          setJudgmentIntakeData((p) => ({
                             ...p,
                             appearanceType: type,
                           }))
                         }
                         className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                          intakeData.appearanceType === type
+                          judgmentIntakeData.appearanceType === type
                             ? 'bg-amber-500 text-black border-amber-500'
                             : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
                         }`}
@@ -457,26 +557,24 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* حالة التبليغ */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   هل تم تبليغك بالحكم رسميًا؟{' '}
                   <span className="text-red-400">*</span>
                 </label>
-
                 <div className="flex flex-wrap gap-2">
                   {['نعم، تم تبليغي', 'لا، لم يتم تبليغي', 'لا أعرف'].map(
                     (status) => (
                       <button
                         key={status}
                         onClick={() =>
-                          setIntakeData((p) => ({
+                          setJudgmentIntakeData((p) => ({
                             ...p,
                             notificationStatus: status,
                           }))
                         }
                         className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                          intakeData.notificationStatus === status
+                          judgmentIntakeData.notificationStatus === status
                             ? 'bg-amber-500 text-black border-amber-500'
                             : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
                         }`}
@@ -488,27 +586,24 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* تاريخ التبليغ */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   تاريخ التبليغ أو تاريخ الحكم{' '}
                   <span className="text-slate-500">(اختياري)</span>
                 </label>
-
                 <input
                   type="date"
-                  value={intakeData.notificationDate}
+                  value={judgmentIntakeData.notificationDate}
                   onChange={(e) =>
-                    setIntakeData((p) => ({
+                    setJudgmentIntakeData((p) => ({
                       ...p,
                       notificationDate: e.target.value,
                     }))
                   }
                   className="w-full bg-slate-600 text-white px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 outline-none transition-all"
                 />
-
-                {intakeData.notificationStatus === 'نعم، تم تبليغي' &&
-                  !intakeData.notificationDate && (
+                {judgmentIntakeData.notificationStatus === 'نعم، تم تبليغي' &&
+                  !judgmentIntakeData.notificationDate && (
                     <p className="mt-2 text-amber-300 text-sm bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 leading-relaxed">
                       ⚠️ تاريخ التبليغ مهم جدًا لحساب مدة الطعن. أدخله إن كان
                       متوفرًا.
@@ -516,30 +611,29 @@ export default function Home() {
                   )}
               </div>
 
-              {/* المحكمة */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   المحكمة أو الجهة التي أصدرت الحكم{' '}
                   <span className="text-red-400">*</span>
                 </label>
-
                 <input
                   type="text"
-                  value={intakeData.court}
+                  value={judgmentIntakeData.court}
                   onChange={(e) =>
-                    setIntakeData((p) => ({ ...p, court: e.target.value }))
+                    setJudgmentIntakeData((p) => ({
+                      ...p,
+                      court: e.target.value,
+                    }))
                   }
                   placeholder="مثال: محكمة بداية عمان، محكمة صلح إربد، لا أعرف..."
                   className="w-full bg-slate-600 text-white placeholder-slate-400 px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 outline-none transition-all text-right"
                 />
               </div>
 
-              {/* الصفة */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   صفتك في القضية <span className="text-red-400">*</span>
                 </label>
-
                 <div className="flex flex-wrap gap-2">
                   {[
                     'مدعي',
@@ -554,10 +648,10 @@ export default function Home() {
                     <button
                       key={role}
                       onClick={() =>
-                        setIntakeData((p) => ({ ...p, role }))
+                        setJudgmentIntakeData((p) => ({ ...p, role }))
                       }
                       className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                        intakeData.role === role
+                        judgmentIntakeData.role === role
                           ? 'bg-amber-500 text-black border-amber-500'
                           : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
                       }`}
@@ -568,25 +662,23 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* التنفيذ */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   هل يوجد تنفيذ أو تبليغ تنفيذ؟{' '}
                   <span className="text-red-400">*</span>
                 </label>
-
                 <div className="flex flex-wrap gap-2">
                   {['نعم', 'لا', 'لا أعرف'].map((status) => (
                     <button
                       key={status}
                       onClick={() =>
-                        setIntakeData((p) => ({
+                        setJudgmentIntakeData((p) => ({
                           ...p,
                           hasExecution: status,
                         }))
                       }
                       className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                        intakeData.hasExecution === status
+                        judgmentIntakeData.hasExecution === status
                           ? 'bg-amber-500 text-black border-amber-500'
                           : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
                       }`}
@@ -597,25 +689,23 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* نسخة الحكم */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   هل لديك نسخة من الحكم؟{' '}
                   <span className="text-red-400">*</span>
                 </label>
-
                 <div className="flex flex-wrap gap-2">
                   {['نعم', 'لا', 'لا أعرف'].map((status) => (
                     <button
                       key={status}
                       onClick={() =>
-                        setIntakeData((p) => ({
+                        setJudgmentIntakeData((p) => ({
                           ...p,
                           hasJudgmentCopy: status,
                         }))
                       }
                       className={`px-4 py-2 rounded-xl text-sm border transition-all ${
-                        intakeData.hasJudgmentCopy === status
+                        judgmentIntakeData.hasJudgmentCopy === status
                           ? 'bg-amber-500 text-black border-amber-500'
                           : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
                       }`}
@@ -626,17 +716,18 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* تفاصيل إضافية */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
                   تفاصيل إضافية{' '}
                   <span className="text-slate-500">(اختياري)</span>
                 </label>
-
                 <textarea
-                  value={intakeData.details}
+                  value={judgmentIntakeData.details}
                   onChange={(e) =>
-                    setIntakeData((p) => ({ ...p, details: e.target.value }))
+                    setJudgmentIntakeData((p) => ({
+                      ...p,
+                      details: e.target.value,
+                    }))
                   }
                   placeholder="أي معلومات إضافية تساعد في تقديم توجيه أدق، بدون ذكر معلومات شخصية حساسة..."
                   rows={3}
@@ -644,18 +735,17 @@ export default function Home() {
                 />
               </div>
 
-              {/* Buttons */}
               <div className="flex gap-3 pt-2">
                 <button
-                  onClick={submitIntake}
+                  onClick={submitJudgmentIntake}
                   disabled={
-                    !intakeData.verdictType ||
-                    !intakeData.appearanceType ||
-                    !intakeData.notificationStatus ||
-                    !intakeData.court ||
-                    !intakeData.role ||
-                    !intakeData.hasExecution ||
-                    !intakeData.hasJudgmentCopy
+                    !judgmentIntakeData.verdictType ||
+                    !judgmentIntakeData.appearanceType ||
+                    !judgmentIntakeData.notificationStatus ||
+                    !judgmentIntakeData.court ||
+                    !judgmentIntakeData.role ||
+                    !judgmentIntakeData.hasExecution ||
+                    !judgmentIntakeData.hasJudgmentCopy
                   }
                   className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold py-3 rounded-xl transition-all"
                 >
@@ -673,7 +763,425 @@ export default function Home() {
           </div>
         )}
 
-        {/* Loading Skeleton */}
+        {intakeType === 'contractsBusiness' && !loading && (
+          <div
+            className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 border border-amber-500/50 shadow-xl"
+            dir="rtl"
+          >
+            <div className="flex items-center gap-2 mb-5 pb-3 border-b border-slate-600">
+              <span className="text-amber-400 text-xl">📄</span>
+              <h3 className="text-amber-400 font-bold text-lg">
+                تفاصيل العقد / الشركة
+              </h3>
+            </div>
+
+            <p className="text-slate-300 text-sm mb-5 leading-relaxed">
+              لأن سؤالك مرتبط بعقد أو شركة أو شراكة، نحتاج بعض التفاصيل قبل
+              تقديم توجيه أدق. لا تكتب معلومات شخصية حساسة.
+            </p>
+
+            {pendingQuestion && (
+              <div className="mb-5 bg-slate-800/60 border border-slate-600 rounded-xl p-4">
+                <p className="text-slate-400 text-xs mb-1">السؤال:</p>
+                <p className="text-slate-200 text-sm">{pendingQuestion}</p>
+              </div>
+            )}
+
+            <div className="space-y-5">
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  نوع العقد أو العلاقة <span className="text-red-400">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'عقد خدمات',
+                    'عقد شراكة',
+                    'عقد توريد',
+                    'عقد بيع',
+                    'عقد عمل / متعاقد',
+                    'اتفاقية سرية NDA',
+                    'اتفاقية استثمار',
+                    'عقد تطوير / برمجة / تصميم',
+                    'لا أعرف',
+                  ].map((type) => (
+                    <button
+                      key={type}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          contractType: type,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.contractType === type
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  صفتك في العلاقة <span className="text-red-400">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'عميل',
+                    'مزود خدمة',
+                    'شريك',
+                    'مؤسس',
+                    'مستثمر',
+                    'موظف / متعاقد',
+                    'بائع',
+                    'مشتري',
+                    'طرف في العقد',
+                    'لا أعرف',
+                  ].map((role) => (
+                    <button
+                      key={role}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          userRole: role,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.userRole === role
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {role}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل يوجد عقد مكتوب؟ <span className="text-red-400">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {['نعم', 'لا', 'مسودة فقط', 'محادثات واتساب / إيميل فقط', 'لا أعرف'].map(
+                    (status) => (
+                      <button
+                        key={status}
+                        onClick={() =>
+                          setContractIntakeData((p) => ({
+                            ...p,
+                            hasWrittenContract: status,
+                          }))
+                        }
+                        className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                          contractIntakeData.hasWrittenContract === status
+                            ? 'bg-amber-500 text-black border-amber-500'
+                            : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                        }`}
+                      >
+                        {status}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل تم توقيع العقد؟ <span className="text-red-400">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {['نعم', 'لا', 'توقيع إلكتروني', 'تم الاتفاق شفهيًا', 'لا أعرف'].map(
+                    (status) => (
+                      <button
+                        key={status}
+                        onClick={() =>
+                          setContractIntakeData((p) => ({
+                            ...p,
+                            isSigned: status,
+                          }))
+                        }
+                        className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                          contractIntakeData.isSigned === status
+                            ? 'bg-amber-500 text-black border-amber-500'
+                            : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                        }`}
+                      >
+                        {status}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  ما المشكلة الرئيسية؟ <span className="text-red-400">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'أريد مراجعة بند',
+                    'أريد فهم المخاطر',
+                    'الطرف الآخر لم يلتزم',
+                    'أريد فسخ العقد',
+                    'توجد مطالبة مالية',
+                    'يوجد شرط جزائي',
+                    'خلاف بين شركاء',
+                    'أريد صياغة بند',
+                    'أريد معرفة حقوقي قبل التوقيع',
+                  ].map((issue) => (
+                    <button
+                      key={issue}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          mainIssue: issue,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.mainIssue === issue
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {issue}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل توجد مبالغ مالية أو مستحقات؟
+                </label>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {['نعم', 'لا', 'لا أعرف'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          hasMoney: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.hasMoney === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={contractIntakeData.moneyDetails}
+                  onChange={(e) =>
+                    setContractIntakeData((p) => ({
+                      ...p,
+                      moneyDetails: e.target.value,
+                    }))
+                  }
+                  placeholder="مثال: 5000 دينار مستحقة من الدفعة الثانية"
+                  className="w-full bg-slate-600 text-white placeholder-slate-400 px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 outline-none transition-all text-right"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل يوجد شرط جزائي أو غرامة تأخير؟
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {['نعم', 'لا', 'لا أعرف'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          hasPenaltyClause: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.hasPenaltyClause === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل توجد مدة محددة للعقد؟
+                </label>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {['نعم', 'لا', 'لا أعرف'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          hasDuration: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.hasDuration === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={contractIntakeData.durationDetails}
+                  onChange={(e) =>
+                    setContractIntakeData((p) => ({
+                      ...p,
+                      durationDetails: e.target.value,
+                    }))
+                  }
+                  placeholder="مثال: سنة واحدة، أو ينتهي بتاريخ معين..."
+                  className="w-full bg-slate-600 text-white placeholder-slate-400 px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 outline-none transition-all text-right"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل يوجد بند اختصاص أو قانون واجب التطبيق؟
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {['نعم', 'لا', 'لا أعرف'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          hasJurisdictionClause: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.hasJurisdictionClause === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل توجد سرية أو ملكية فكرية؟
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {['نعم', 'لا', 'لا أعرف'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setContractIntakeData((p) => ({
+                          ...p,
+                          hasIpOrConfidentiality: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        contractIntakeData.hasIpOrConfidentiality === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل العقد قبل التوقيع أم بعد حدوث مشكلة؟{' '}
+                  <span className="text-red-400">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {['قبل التوقيع', 'بعد التوقيع', 'حدث خلاف بالفعل', 'لا أعرف'].map(
+                    (stage) => (
+                      <button
+                        key={stage}
+                        onClick={() =>
+                          setContractIntakeData((p) => ({
+                            ...p,
+                            stage,
+                          }))
+                        }
+                        className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                          contractIntakeData.stage === stage
+                            ? 'bg-amber-500 text-black border-amber-500'
+                            : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                        }`}
+                      >
+                        {stage}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  تفاصيل إضافية{' '}
+                  <span className="text-slate-500">(اختياري)</span>
+                </label>
+                <textarea
+                  value={contractIntakeData.details}
+                  onChange={(e) =>
+                    setContractIntakeData((p) => ({
+                      ...p,
+                      details: e.target.value,
+                    }))
+                  }
+                  placeholder="اشرح المشكلة باختصار دون إدخال بيانات شخصية حساسة..."
+                  rows={3}
+                  className="w-full bg-slate-600 text-white placeholder-slate-400 px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 outline-none transition-all text-right resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={submitContractIntake}
+                  disabled={
+                    !contractIntakeData.contractType ||
+                    !contractIntakeData.userRole ||
+                    !contractIntakeData.hasWrittenContract ||
+                    !contractIntakeData.isSigned ||
+                    !contractIntakeData.mainIssue ||
+                    !contractIntakeData.stage
+                  }
+                  className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold py-3 rounded-xl transition-all"
+                >
+                  احصل على الاستشارة ⚖️
+                </button>
+
+                <button
+                  onClick={cancelIntake}
+                  className="px-6 bg-slate-600 hover:bg-slate-500 text-slate-300 py-3 rounded-xl transition-all"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {loading && (
           <div className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 animate-pulse">
             <div className="h-4 bg-slate-600 rounded w-3/4 ml-auto mb-3" />
@@ -683,7 +1191,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Answer Box */}
         {answer && !loading && (
           <div
             className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 shadow-xl border border-slate-600"
@@ -775,7 +1282,7 @@ export default function Home() {
                 </span>
 
                 <div className="flex gap-2 flex-wrap">
-                  {hasIntakeData && (
+                  {hasAnyIntakeData && (
                     <button
                       onClick={editIntakeDetails}
                       className="bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm px-4 py-2 rounded-xl transition-colors"
@@ -803,7 +1310,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Suggested Questions */}
         {suggestions.length > 0 && !loading && (
           <div className="w-full max-w-2xl mt-4" dir="rtl">
             <p className="text-slate-400 text-sm mb-3">
