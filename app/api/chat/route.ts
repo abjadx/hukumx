@@ -1,7 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { NextRequest, NextResponse } from 'next/server';
 
-const client = new Anthropic();
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1';
 
 const MAX_QUESTION_LENGTH = 2000;
 const MAX_CONTEXT_FIELD_LENGTH = 120;
@@ -654,15 +658,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2400,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: contentParts.join('\n') }],
+    const response = await openai.responses.create({
+      model: OPENAI_MODEL,
+      instructions: SYSTEM_PROMPT,
+      input: contentParts.join('\n'),
+      max_output_tokens: 2400,
     });
 
-    const firstContent = message.content[0];
-    const fullText = firstContent?.type === 'text' ? firstContent.text : '';
+    const fullText = response.output_text || '';
 
     if (!fullText.trim()) {
       return jsonError('لم نتمكن من توليد إجابة، حاول مرة أخرى', 500);
