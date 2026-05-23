@@ -335,6 +335,110 @@ function normalizeText(value: unknown): string | null {
 
 export async function POST(req: NextRequest) {
   try {
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ error: 'طلب غير صالح' }, { status: 400 });
+    }
+
+    const { question, country, caseType, intakeData } = body;
+
+    if (!question || typeof question !== 'string' || !country || !caseType) {
+      return NextResponse.json(
+        { error: 'يرجى اختيار الدولة ونوع القضية وكتابة سؤالك' },
+        { status: 400 }
+      );
+    }
+
+    const trimmed = question.trim();
+
+    if (trimmed.length === 0) {
+      return NextResponse.json({ error: 'لا يمكن إرسال سؤال فارغ' }, { status: 400 });
+    }
+
+    if (trimmed.length < 5) {
+      return NextResponse.json({ error: 'السؤال قصير جداً، يرجى توضيح استفسارك' }, { status: 400 });
+    }
+
+    if (trimmed.length > 2000) {
+      return NextResponse.json({ error: 'السؤال طويل جداً، الحد الأقصى 2000 حرف' }, { status: 400 });
+    }
+
+    // كشف إذا كان السؤال عن استئناف أو حكم
+    if (!intakeData) {
+      const detectMessage = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 100,
+        messages: [{
+          role: 'user',
+          content: `هل هذا السؤال يتعلق باستئناف حكم قضائي أو تنفيذ حكم أو الطعن في حكم؟
+أجب بـ YES أو NO فقط بدون أي كلام آخر.
+السؤال: "${trimmed}"`,
+        }],
+      });
+
+      const detection = detectMessage.content[0].type === 'text'
+        ? detectMessage.content[0].text.trim().toUpperCase()
+        : 'NO';
+
+      if (detection === 'YES') {
+        return NextResponse.json({ needsIntake: true });
+      }
+    }
+
+    // بناء السؤال الكامل مع بيانات النموذج إن وجدت
+    let fullQuestion = `الدولة: ${country}\nنوع القضية: ${caseType}\nالسؤال: ${trimmed}`;
+
+    if (intakeData) {
+      fullQuestion += `\n\nتفاصيل إضافية:
+- نوع الحكم: ${intakeData.verdictType}
+- تاريخ التبليغ: ${intakeData.notificationDate}
+- المحكمة: ${intakeData.court}
+- صفة المستخدم في القضية: ${intakeData.role}
+- تفاصيل إضافية: ${intakeData.details || 'لا يوجد'}`;
+    }
+
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: fullQuestion }],
+    });
+
+    const fullText = message.content[0].type === 'text' ? message.content[0].text : '';
+
+    if (!fullText) {
+      return NextResponse.json({ error: 'لم نتمكن من توليد إجابة، حاول مرة أخرى' }, { status: 500 });
+    }
+
+    const parts = fullText.split('---SUGGESTED_QUESTIONS---');
+    const answer = parts[0].trim();
+
+    let suggestions: string[] = [];
+    if (parts[1]) {
+      const suggestionsText = parts[1].split('---END_SUGGESTED---')[0].trim();
+      suggestions = suggestionsText.split('\n').map(s => s.trim()).filter(s => s.length > 0).slice(0, 3);
+    }
+
+    return NextResponse.json({ answer, suggestions });
+
+  } catch (error: unknown) {
+    console.error('Hukumx API Error:', error);
+
+    if (error instanceof Error) {
+      if (error.message.includes('authentication')) {
+        return NextResponse.json({ error: 'خطأ في الاتصال بالخدمة' }, { status: 500 });
+      }
+      if (error.message.includes('rate_limit')) {
+        return NextResponse.json({ error: 'الخدمة مشغولة حالياً، حاول بعد لحظة' }, { status: 429 });
+      }
+    }
+
+    return NextResponse.json({ error: 'حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
     const body = (await req.json().catch(() => null)) as ChatRequestBody | null;
 
     if (!body || typeof body !== 'object') {
