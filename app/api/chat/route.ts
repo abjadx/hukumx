@@ -258,7 +258,7 @@ function normalizeText(value: unknown): string | null {
   return value.trim();
 }
 
-function isInvalidSelection(value: string | null) {
+function isInvalidSelection(value: string | null): value is null {
   return !value || value === 'غير محدد';
 }
 
@@ -335,14 +335,23 @@ export async function POST(req: NextRequest) {
     const country = normalizeText(body.country);
     const caseType = normalizeText(body.caseType);
 
-    if (!question || isInvalidSelection(country) || isInvalidSelection(caseType)) {
-      return jsonError('يرجى اختيار الدولة ونوع القضية وكتابة سؤالك', 400);
+    if (!question) {
+      return jsonError('يرجى كتابة سؤالك القانوني', 400);
+    }
+
+    if (!country || country === 'غير محدد') {
+     return jsonError('يرجى اختيار الدولة قبل إرسال السؤال', 400);
+    }
+
+    if (!caseType || caseType === 'غير محدد') {
+      return jsonError('يرجى اختيار نوع القضية قبل إرسال السؤال', 400);
     }
 
     if (question.length < 5) {
       return jsonError('السؤال قصير جداً، يرجى توضيح استفسارك', 400);
     }
 
+  
     if (question.length > MAX_QUESTION_LENGTH) {
       return jsonError(`السؤال طويل جداً، الحد الأقصى ${MAX_QUESTION_LENGTH} حرف`, 400);
     }
