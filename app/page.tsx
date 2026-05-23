@@ -31,6 +31,8 @@ type IntakeData = {
   notificationDate: string;
   court: string;
   role: string;
+  hasExecution: string;
+  hasJudgmentCopy: string;
   details: string;
 };
 
@@ -41,6 +43,8 @@ const EMPTY_INTAKE: IntakeData = {
   notificationDate: '',
   court: '',
   role: '',
+  hasExecution: '',
+  hasJudgmentCopy: '',
   details: '',
 };
 
@@ -67,6 +71,8 @@ export default function Home() {
     intakeData.notificationDate ||
     intakeData.court ||
     intakeData.role ||
+    intakeData.hasExecution ||
+    intakeData.hasJudgmentCopy ||
     intakeData.details;
 
   const startNewQuestion = () => {
@@ -159,7 +165,9 @@ export default function Home() {
       !intakeData.appearanceType ||
       !intakeData.notificationStatus ||
       !intakeData.court ||
-      !intakeData.role
+      !intakeData.role ||
+      !intakeData.hasExecution ||
+      !intakeData.hasJudgmentCopy
     ) {
       setFormError('يرجى تعبئة الحقول المطلوبة في نموذج الحكم أو الاستئناف');
       return;
@@ -498,10 +506,12 @@ export default function Home() {
                   }
                   className="w-full bg-slate-600 text-white px-4 py-3 rounded-xl border border-slate-500 focus:border-amber-400 outline-none transition-all"
                 />
+
                 {intakeData.notificationStatus === 'نعم، تم تبليغي' &&
                   !intakeData.notificationDate && (
                     <p className="mt-2 text-amber-300 text-sm bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 leading-relaxed">
-                      ⚠️ تاريخ التبليغ مهم جدًا لحساب مدة الطعن. أدخله إن كان متوفرًا.
+                      ⚠️ تاريخ التبليغ مهم جدًا لحساب مدة الطعن. أدخله إن كان
+                      متوفرًا.
                     </p>
                   )}
               </div>
@@ -558,6 +568,64 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* التنفيذ */}
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل يوجد تنفيذ أو تبليغ تنفيذ؟{' '}
+                  <span className="text-red-400">*</span>
+                </label>
+
+                <div className="flex flex-wrap gap-2">
+                  {['نعم', 'لا', 'لا أعرف'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setIntakeData((p) => ({
+                          ...p,
+                          hasExecution: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        intakeData.hasExecution === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* نسخة الحكم */}
+              <div>
+                <label className="text-slate-300 text-sm font-medium block mb-2">
+                  هل لديك نسخة من الحكم؟{' '}
+                  <span className="text-red-400">*</span>
+                </label>
+
+                <div className="flex flex-wrap gap-2">
+                  {['نعم', 'لا', 'لا أعرف'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        setIntakeData((p) => ({
+                          ...p,
+                          hasJudgmentCopy: status,
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-xl text-sm border transition-all ${
+                        intakeData.hasJudgmentCopy === status
+                          ? 'bg-amber-500 text-black border-amber-500'
+                          : 'bg-slate-600 text-slate-300 border-slate-500 hover:border-amber-400'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* تفاصيل إضافية */}
               <div>
                 <label className="text-slate-300 text-sm font-medium block mb-2">
@@ -585,7 +653,9 @@ export default function Home() {
                     !intakeData.appearanceType ||
                     !intakeData.notificationStatus ||
                     !intakeData.court ||
-                    !intakeData.role
+                    !intakeData.role ||
+                    !intakeData.hasExecution ||
+                    !intakeData.hasJudgmentCopy
                   }
                   className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold py-3 rounded-xl transition-all"
                 >
@@ -613,125 +683,126 @@ export default function Home() {
           </div>
         )}
 
-       {/* Answer Box */}
-{answer && !loading && (
-  <div
-    className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 shadow-xl border border-slate-600"
-    dir="rtl"
-  >
-    <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-600">
-      <span className="text-amber-400 text-xl">⚖️</span>
-      <h3 className="text-amber-400 font-bold text-lg">
-        الاستشارة القانونية
-      </h3>
+        {/* Answer Box */}
+        {answer && !loading && (
+          <div
+            className="w-full max-w-2xl mt-6 bg-slate-700 rounded-2xl p-6 shadow-xl border border-slate-600"
+            dir="rtl"
+          >
+            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-600">
+              <span className="text-amber-400 text-xl">⚖️</span>
+              <h3 className="text-amber-400 font-bold text-lg">
+                الاستشارة القانونية
+              </h3>
 
-      {country && (
-        <span className="mr-auto text-xs bg-slate-600 text-slate-300 px-2 py-1 rounded-full">
-          {selectedCountry?.flag} {selectedCountry?.name}
-        </span>
-      )}
-    </div>
+              {country && (
+                <span className="mr-auto text-xs bg-slate-600 text-slate-300 px-2 py-1 rounded-full">
+                  {selectedCountry?.flag} {selectedCountry?.name}
+                </span>
+              )}
+            </div>
 
-    <ReactMarkdown
-      components={{
-        h1: ({ children }) => (
-          <h1 className="text-2xl font-bold text-amber-400 mt-4 mb-2">
-            {children}
-          </h1>
-        ),
-        h2: ({ children }) => (
-          <h2 className="text-xl font-bold text-amber-300 mt-4 mb-2">
-            {children}
-          </h2>
-        ),
-        h3: ({ children }) => (
-          <h3 className="text-lg font-bold text-amber-200 mt-3 mb-1">
-            {children}
-          </h3>
-        ),
-        p: ({ children }) => (
-          <p className="text-slate-200 mb-3 leading-relaxed">
-            {children}
-          </p>
-        ),
-        strong: ({ children }) => (
-          <strong className="text-white font-bold">{children}</strong>
-        ),
-        ul: ({ children }) => (
-          <ul className="list-disc list-inside my-2 space-y-1">
-            {children}
-          </ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="list-decimal list-inside my-2 space-y-1">
-            {children}
-          </ol>
-        ),
-        li: ({ children }) => (
-          <li className="text-slate-200">{children}</li>
-        ),
-        hr: () => <hr className="border-slate-600 my-4" />,
-        blockquote: ({ children }) => (
-          <blockquote className="border-r-4 border-amber-400 pr-4 my-3 text-slate-300 italic">
-            {children}
-          </blockquote>
-        ),
-        table: ({ children }) => (
-          <div className="overflow-x-auto my-4">
-            <table className="w-full border-collapse text-sm">
-              {children}
-            </table>
-          </div>
-        ),
-        th: ({ children }) => (
-          <th className="bg-slate-600 text-amber-300 px-3 py-2 border border-slate-500 text-right">
-            {children}
-          </th>
-        ),
-        td: ({ children }) => (
-          <td className="text-slate-200 px-3 py-2 border border-slate-600">
-            {children}
-          </td>
-        ),
-      }}
-    >
-      {answer}
-    </ReactMarkdown>
-
-    <div className="mt-6 pt-4 border-t border-slate-600 space-y-3">
-      <div className="flex justify-between items-center gap-3 flex-wrap">
-        <span className="text-slate-400 text-sm">
-          ⚠️ استشارة أولية — استشر محاميًا متخصصًا
-        </span>
-
-        <div className="flex gap-2 flex-wrap">
-          {hasIntakeData && (
-            <button
-              onClick={editIntakeDetails}
-              className="bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm px-4 py-2 rounded-xl transition-colors"
+            <ReactMarkdown
+              components={{
+                h1: ({ children }) => (
+                  <h1 className="text-2xl font-bold text-amber-400 mt-4 mb-2">
+                    {children}
+                  </h1>
+                ),
+                h2: ({ children }) => (
+                  <h2 className="text-xl font-bold text-amber-300 mt-4 mb-2">
+                    {children}
+                  </h2>
+                ),
+                h3: ({ children }) => (
+                  <h3 className="text-lg font-bold text-amber-200 mt-3 mb-1">
+                    {children}
+                  </h3>
+                ),
+                p: ({ children }) => (
+                  <p className="text-slate-200 mb-3 leading-relaxed">
+                    {children}
+                  </p>
+                ),
+                strong: ({ children }) => (
+                  <strong className="text-white font-bold">{children}</strong>
+                ),
+                ul: ({ children }) => (
+                  <ul className="list-disc list-inside my-2 space-y-1">
+                    {children}
+                  </ul>
+                ),
+                ol: ({ children }) => (
+                  <ol className="list-decimal list-inside my-2 space-y-1">
+                    {children}
+                  </ol>
+                ),
+                li: ({ children }) => (
+                  <li className="text-slate-200">{children}</li>
+                ),
+                hr: () => <hr className="border-slate-600 my-4" />,
+                blockquote: ({ children }) => (
+                  <blockquote className="border-r-4 border-amber-400 pr-4 my-3 text-slate-300 italic">
+                    {children}
+                  </blockquote>
+                ),
+                table: ({ children }) => (
+                  <div className="overflow-x-auto my-4">
+                    <table className="w-full border-collapse text-sm">
+                      {children}
+                    </table>
+                  </div>
+                ),
+                th: ({ children }) => (
+                  <th className="bg-slate-600 text-amber-300 px-3 py-2 border border-slate-500 text-right">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }) => (
+                  <td className="text-slate-200 px-3 py-2 border border-slate-600">
+                    {children}
+                  </td>
+                ),
+              }}
             >
-              تعديل التفاصيل ✏️
-            </button>
-          )}
+              {answer}
+            </ReactMarkdown>
 
-          <button
-            onClick={() => navigator.clipboard.writeText(answer)}
-            className="bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm px-4 py-2 rounded-xl transition-colors"
-          >
-            نسخ 📋
-          </button>
+            <div className="mt-6 pt-4 border-t border-slate-600 space-y-3">
+              <div className="flex justify-between items-center gap-3 flex-wrap">
+                <span className="text-slate-400 text-sm">
+                  ⚠️ استشارة أولية — استشر محاميًا متخصصًا
+                </span>
 
-          <button
-            onClick={startNewQuestion}
-            className="bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm px-4 py-2 rounded-xl transition-colors"
-          >
-            سؤال جديد +
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+                <div className="flex gap-2 flex-wrap">
+                  {hasIntakeData && (
+                    <button
+                      onClick={editIntakeDetails}
+                      className="bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm px-4 py-2 rounded-xl transition-colors"
+                    >
+                      تعديل التفاصيل ✏️
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => navigator.clipboard.writeText(answer)}
+                    className="bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm px-4 py-2 rounded-xl transition-colors"
+                  >
+                    نسخ 📋
+                  </button>
+
+                  <button
+                    onClick={startNewQuestion}
+                    className="bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm px-4 py-2 rounded-xl transition-colors"
+                  >
+                    سؤال جديد +
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Suggested Questions */}
         {suggestions.length > 0 && !loading && (
           <div className="w-full max-w-2xl mt-4" dir="rtl">

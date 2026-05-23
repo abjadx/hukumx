@@ -135,6 +135,8 @@ const SYSTEM_PROMPT = `
 - لا تجزم بإمكانية الاستئناف أو النجاح.
 - اسأل عن نوع الحكم، طريقة صدوره، تاريخ التبليغ، والمحكمة.
 - وجّه المستخدم لمراجعة محامٍ إذا كان هناك موعد طعن أو تنفيذ.
+- إذا كان هناك تنفيذ أو تبليغ تنفيذ، شدد على ضرورة التصرف العاجل ومراجعة محامٍ أو دائرة التنفيذ.
+- إذا لم يكن لدى المستخدم نسخة من الحكم، اجعل الحصول عليها خطوة أساسية.
 
 ====================
 الأدلة والمستندات
@@ -198,6 +200,11 @@ const SYSTEM_PROMPT = `
 ## متى تحتاج إلى محامٍ؟
 ## تنبيه مهم
 
+إذا تم تزويدك بتفاصيل نموذج الحكم أو الاستئناف، أضف قسمًا قصيرًا بعنوان:
+
+## ملخص مختصر للمحامي
+اكتب ملخصًا عمليًا منظمًا يصلح أن ينسخه المستخدم ويرسله لمحامٍ، بدون بيانات شخصية حساسة.
+
 في قسم "تنبيه مهم" اكتب دائمًا:
 "هذه إجابة إرشادية أولية وليست استشارة قانونية نهائية. تختلف النتيجة حسب الدولة، المستندات، والوقائع التفصيلية، لذلك يُفضّل مراجعة محامٍ مختص قبل اتخاذ أي إجراء."
 
@@ -210,6 +217,8 @@ const SYSTEM_PROMPT = `
 - لا تطل أكثر من اللازم.
 - لا تستخدم عبارات قطعية في المسائل القانونية.
 - في الأسئلة العاجلة أو المتعلقة بالمدد والطعن، اختصر الإجابة وابدأ بالتحذير العملي بدل الشرح الطويل.
+- إذا كان لدى المستخدم تنفيذ أو تبليغ تنفيذ، اجعل النبرة أكثر استعجالًا.
+- إذا لم يكن لديه نسخة من الحكم، اجعل الحصول على نسخة الحكم أولوية.
 
 ====================
 الأسئلة المقترحة
@@ -239,6 +248,8 @@ type IntakeData = {
   notificationDate?: unknown;
   court?: unknown;
   role?: unknown;
+  hasExecution?: unknown;
+  hasJudgmentCopy?: unknown;
   details?: unknown;
 };
 
@@ -257,7 +268,6 @@ function normalizeText(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   return value.trim();
 }
-
 
 function isJudgmentOrAppealQuestion(question: string) {
   const keywords = [
@@ -283,12 +293,23 @@ function normalizeIntakeData(intakeData: IntakeData | null) {
   const verdictType = normalizeText(intakeData.verdictType);
   const appearanceType = normalizeText(intakeData.appearanceType);
   const notificationStatus = normalizeText(intakeData.notificationStatus);
-  const notificationDate = normalizeText(intakeData.notificationDate) || 'غير محدد';
+  const notificationDate =
+    normalizeText(intakeData.notificationDate) || 'غير محدد';
   const court = normalizeText(intakeData.court);
   const role = normalizeText(intakeData.role);
+  const hasExecution = normalizeText(intakeData.hasExecution);
+  const hasJudgmentCopy = normalizeText(intakeData.hasJudgmentCopy);
   const details = normalizeText(intakeData.details) || 'لا يوجد';
 
-  if (!verdictType || !appearanceType || !notificationStatus || !court || !role) {
+  if (
+    !verdictType ||
+    !appearanceType ||
+    !notificationStatus ||
+    !court ||
+    !role ||
+    !hasExecution ||
+    !hasJudgmentCopy
+  ) {
     return null;
   }
 
@@ -299,6 +320,8 @@ function normalizeIntakeData(intakeData: IntakeData | null) {
     notificationDate,
     court,
     role,
+    hasExecution,
+    hasJudgmentCopy,
   ];
 
   if (fields.some((field) => field.length > MAX_CONTEXT_FIELD_LENGTH)) {
@@ -316,6 +339,8 @@ function normalizeIntakeData(intakeData: IntakeData | null) {
     notificationDate,
     court,
     role,
+    hasExecution,
+    hasJudgmentCopy,
     details,
   };
 }
@@ -337,7 +362,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!country || country === 'غير محدد') {
-     return jsonError('يرجى اختيار الدولة قبل إرسال السؤال', 400);
+      return jsonError('يرجى اختيار الدولة قبل إرسال السؤال', 400);
     }
 
     if (!caseType || caseType === 'غير محدد') {
@@ -348,19 +373,27 @@ export async function POST(req: NextRequest) {
       return jsonError('السؤال قصير جداً، يرجى توضيح استفسارك', 400);
     }
 
-  
     if (question.length > MAX_QUESTION_LENGTH) {
-      return jsonError(`السؤال طويل جداً، الحد الأقصى ${MAX_QUESTION_LENGTH} حرف`, 400);
+      return jsonError(
+        `السؤال طويل جداً، الحد الأقصى ${MAX_QUESTION_LENGTH} حرف`,
+        400
+      );
     }
 
-    if (country.length > MAX_CONTEXT_FIELD_LENGTH || caseType.length > MAX_CONTEXT_FIELD_LENGTH) {
+    if (
+      country.length > MAX_CONTEXT_FIELD_LENGTH ||
+      caseType.length > MAX_CONTEXT_FIELD_LENGTH
+    ) {
       return jsonError('بيانات الدولة أو نوع القضية غير صالحة', 400);
     }
 
     const normalizedIntake = normalizeIntakeData(body.intakeData || null);
 
     if (body.intakeData && !normalizedIntake) {
-      return jsonError('بيانات نموذج الحكم أو الاستئناف غير مكتملة أو غير صالحة', 400);
+      return jsonError(
+        'بيانات نموذج الحكم أو الاستئناف غير مكتملة أو غير صالحة',
+        400
+      );
     }
 
     if (!normalizedIntake && isJudgmentOrAppealQuestion(question)) {
@@ -380,19 +413,27 @@ export async function POST(req: NextRequest) {
       contentParts.push(`- نوع الحكم أو القرار: ${normalizedIntake.verdictType}`);
       contentParts.push(`- طريقة صدور الحكم: ${normalizedIntake.appearanceType}`);
       contentParts.push(`- حالة التبليغ: ${normalizedIntake.notificationStatus}`);
-      contentParts.push(`- تاريخ التبليغ أو التاريخ المتاح: ${normalizedIntake.notificationDate}`);
+      contentParts.push(
+        `- تاريخ التبليغ أو التاريخ المتاح: ${normalizedIntake.notificationDate}`
+      );
       contentParts.push(`- المحكمة أو الجهة: ${normalizedIntake.court}`);
       contentParts.push(`- صفة المستخدم في القضية: ${normalizedIntake.role}`);
+      contentParts.push(
+        `- هل يوجد تنفيذ أو تبليغ تنفيذ: ${normalizedIntake.hasExecution}`
+      );
+      contentParts.push(
+        `- هل لدى المستخدم نسخة من الحكم: ${normalizedIntake.hasJudgmentCopy}`
+      );
       contentParts.push(`- تفاصيل إضافية: ${normalizedIntake.details}`);
       contentParts.push('');
       contentParts.push(
-        'تعامل مع هذه الحالة كمسألة عالية الحساسية مرتبطة بحكم أو مدة قانونية. لا تعطِ مدة قطعية دون مصدر رسمي، وركّز على التحقق من التبليغ ونوع الحكم والجهة المختصة.'
+        'تعامل مع هذه الحالة كمسألة عالية الحساسية مرتبطة بحكم أو مدة قانونية. لا تعطِ مدة قطعية دون مصدر رسمي، وركّز على التحقق من التبليغ ونوع الحكم والجهة المختصة والتنفيذ ونسخة الحكم.'
       );
     }
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 2200,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: contentParts.join('\n') }],
     });
