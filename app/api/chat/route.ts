@@ -737,7 +737,6 @@ export async function POST(req: NextRequest) {
               {
                 type: 'file_search' as const,
                 vector_store_ids: [JORDAN_LAWS_VECTOR_STORE_ID as string],
-                max_num_results: 6,
               },
             ],
           }
