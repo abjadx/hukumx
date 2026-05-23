@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 type SelectedCountry = {
@@ -10,6 +11,7 @@ type SelectedCountry = {
 
 type AnswerBoxProps = {
   answer: string;
+  lawyerSummary: string;
   loading: boolean;
   selectedCountry?: SelectedCountry;
   hasAnyIntakeData: string | boolean;
@@ -19,13 +21,37 @@ type AnswerBoxProps = {
 
 export default function AnswerBox({
   answer,
+  lawyerSummary,
   loading,
   selectedCountry,
   hasAnyIntakeData,
   onEditDetails,
   onStartNewQuestion,
 }: AnswerBoxProps) {
+  const [copiedAnswer, setCopiedAnswer] = useState(false);
+  const [copiedLawyerSummary, setCopiedLawyerSummary] = useState(false);
+
   if (!answer || loading) return null;
+
+  const copyLawyerSummary = async () => {
+    if (!lawyerSummary) return;
+
+    await navigator.clipboard.writeText(lawyerSummary);
+    setCopiedLawyerSummary(true);
+
+    setTimeout(() => {
+      setCopiedLawyerSummary(false);
+    }, 2000);
+  };
+
+  const copyAnswer = async () => {
+    await navigator.clipboard.writeText(answer);
+    setCopiedAnswer(true);
+
+    setTimeout(() => {
+      setCopiedAnswer(false);
+    }, 2000);
+  };
 
   return (
     <div
@@ -121,11 +147,30 @@ export default function AnswerBox({
               </button>
             )}
 
+            {lawyerSummary && (
+              <button
+                onClick={copyLawyerSummary}
+                className={`border text-sm px-4 py-2 rounded-xl transition-colors ${
+                  copiedLawyerSummary
+                    ? 'bg-green-500/20 text-green-300 border-green-500/40'
+                    : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                }`}
+              >
+                {copiedLawyerSummary
+                  ? 'تم نسخ الملخص ✅'
+                  : 'نسخ ملخص المحامي 👨‍⚖️'}
+              </button>
+            )}
+
             <button
-              onClick={() => navigator.clipboard.writeText(answer)}
-              className="bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm px-4 py-2 rounded-xl transition-colors"
+              onClick={copyAnswer}
+              className={`text-sm px-4 py-2 rounded-xl transition-colors ${
+                copiedAnswer
+                  ? 'bg-green-500/20 text-green-300 border border-green-500/40'
+                  : 'bg-slate-600 hover:bg-slate-500 text-slate-200'
+              }`}
             >
-              نسخ 📋
+              {copiedAnswer ? 'تم النسخ ✅' : 'نسخ 📋'}
             </button>
 
             <button

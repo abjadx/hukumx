@@ -25,6 +25,7 @@ export default function Home() {
   const [caseType, setCaseType] = useState('');
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
+  const [lawyerSummary, setLawyerSummary] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
@@ -77,6 +78,7 @@ export default function Home() {
     setCaseType('');
     setQuestion('');
     setAnswer('');
+    setLawyerSummary('');
     setSuggestions([]);
     setLoading(false);
     setFormError('');
@@ -89,6 +91,7 @@ export default function Home() {
 
   const editIntakeDetails = () => {
     setAnswer('');
+    setLawyerSummary('');
     setSuggestions([]);
 
     if (activeAnswerIntakeType) {
@@ -127,6 +130,7 @@ export default function Home() {
 
     setLoading(true);
     setAnswer('');
+    setLawyerSummary('');
     setSuggestions([]);
     setIntakeType(null);
 
@@ -167,6 +171,7 @@ export default function Home() {
 
       setQuestion(finalQuestion);
       setAnswer(data.answer || '');
+      setLawyerSummary(data.lawyerSummary || '');
       setSuggestions(data.suggestions || []);
       setActiveAnswerIntakeType(submittedIntakeType || null);
     } catch {
@@ -312,6 +317,7 @@ export default function Home() {
 
         <AnswerBox
           answer={answer}
+          lawyerSummary={lawyerSummary}
           loading={loading}
           selectedCountry={selectedCountry}
           hasAnyIntakeData={hasAnyIntakeData}
