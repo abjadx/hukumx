@@ -59,7 +59,7 @@ const SYSTEM_PROMPT = `
 5. لا تجعل المستخدم يعتمد على رقم زمني دون تحقق رسمي.
 
 إذا كان السؤال عن مدة قانونية أو استئناف أو اعتراض أو طعن:
-- ابدأ بقسم "## تنبيه عاجل".
+- ابدأ answer بقسم "## تنبيه عاجل".
 - لا تجعل الإجابة طويلة.
 - لا تذكر مدة رقمية إلا بصيغة حذرة جدًا ومع التنبيه إلى ضرورة التحقق الرسمي.
 - اجعل أول خطوة مقترحة هي مراجعة محامٍ أو قلم المحكمة فورًا.
@@ -90,7 +90,7 @@ const SYSTEM_PROMPT = `
 - إذا توجد مبالغ مالية أو شرط جزائي أو خلاف شركاء، وجّه لمراجعة محامٍ قبل التصرف.
 - لا تعطِ حكمًا قطعيًا مثل "البند باطل" أو "العقد صحيح 100%" أو "لن تتحمل مسؤولية".
 
-إذا كانت حالة العقود عالية الخطورة، ابدأ بقسم:
+إذا كانت حالة العقود عالية الخطورة، ابدأ answer بقسم:
 ## تنبيه مهم قبل التصرف
 
 وتعتبر الحالة عالية الخطورة إذا تضمنت:
@@ -116,7 +116,7 @@ const SYSTEM_PROMPT = `
 - قل دائمًا إن استخدام الأدلة يجب أن يكون بطريقة قانونية.
 
 ====================
-شكل الإجابة
+شكل الإجابة داخل answer
 ====================
 
 للحالات العادية استخدم:
@@ -156,24 +156,39 @@ const SYSTEM_PROMPT = `
 "هذه إجابة إرشادية أولية وليست استشارة قانونية نهائية. تختلف النتيجة حسب الدولة، المستندات، والوقائع التفصيلية، لذلك يُفضّل مراجعة محامٍ مختص قبل اتخاذ أي إجراء."
 
 ====================
-الأسئلة المقترحة
+صيغة الإخراج الإلزامية
 ====================
 
-في نهاية كل إجابة، يجب إضافة هذا القسم بالضبط:
+يجب أن يكون الإخراج النهائي JSON فقط، بدون Markdown خارج JSON، وبدون أي نص إضافي قبله أو بعده.
 
----SUGGESTED_QUESTIONS---
-سؤال قانوني مقترح قصير ومباشر متعلق بنفس الحالة
-سؤال قانوني مقترح قصير ومباشر متعلق بنفس الحالة
-سؤال قانوني مقترح قصير ومباشر متعلق بنفس الحالة
----END_SUGGESTED---
+أعد النتيجة بهذه الحقول فقط:
 
-قواعد الأسئلة المقترحة:
-- يجب أن تكون عملية ومباشرة.
+{
+  "answer": "الإجابة القانونية الكاملة بصيغة Markdown عربية واضحة",
+  "suggestions": [
+    "سؤال متابعة قصير ومباشر متعلق بنفس الحالة",
+    "سؤال متابعة قصير ومباشر متعلق بنفس الحالة",
+    "سؤال متابعة قصير ومباشر متعلق بنفس الحالة"
+  ],
+  "lawyerSummary": "ملخص مختصر منظم يصلح أن يرسله المستخدم لمحامٍ، بدون بيانات شخصية حساسة"
+}
+
+قواعد answer:
+- اكتب الإجابة كاملة باللغة العربية.
+- استخدم عناوين Markdown المناسبة حسب نوع الحالة.
+- لا تضع قسم الأسئلة المقترحة داخل answer.
+- إذا كانت الحالة من مسار الأحكام أو العقود، يجب أن تحتوي answer على قسم "## ملخص مختصر للمحامي" أيضًا، ولكن لا مانع من تكرار نفس الملخص في lawyerSummary بشكل مختصر.
+
+قواعد suggestions:
+- يجب أن تكون 3 أسئلة فقط.
+- لا تستخدم ترقيمًا.
+- لا تستخدم Markdown.
 - يجب أن تكون مرتبطة بنفس الحالة.
-- لا تضف ترقيمًا.
-- لا تجعلها عامة جدًا.
-- لا تضع علامات Markdown داخلها.
-- لا تكتب أكثر من 3 أسئلة.
+
+قواعد lawyerSummary:
+- لا تضع بيانات شخصية حساسة.
+- اجعله عمليًا ومختصرًا.
+- يجب أن يذكر الدولة، نوع القضية، والسؤال/المشكلة إذا كانت متاحة.
 `;
 
 type IntakeType = 'judgmentAppeal' | 'contractsBusiness';
@@ -218,6 +233,38 @@ type ChatRequestBody = {
   // Backward compatibility with the first flow
   intakeData?: JudgmentIntakeData | null;
 };
+
+type LegalAiOutput = {
+  answer: string;
+  suggestions: string[];
+  lawyerSummary: string;
+};
+
+const LEGAL_AI_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    answer: {
+      type: 'string',
+      description: 'The full legal guidance answer in Arabic Markdown.',
+    },
+    suggestions: {
+      type: 'array',
+      description: 'Three short Arabic follow-up legal questions.',
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: 'string',
+      },
+    },
+    lawyerSummary: {
+      type: 'string',
+      description:
+        'A concise Arabic summary the user can send to a specialized lawyer.',
+    },
+  },
+  required: ['answer', 'suggestions', 'lawyerSummary'],
+} as const;
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -538,10 +585,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (
-      body.intakeType === 'contractsBusiness' &&
-      !normalizedContractIntake
-    ) {
+    if (body.intakeType === 'contractsBusiness' && !normalizedContractIntake) {
       return jsonError(
         'بيانات نموذج العقود والشركات غير مكتملة أو غير صالحة',
         400
@@ -663,6 +707,14 @@ export async function POST(req: NextRequest) {
       instructions: SYSTEM_PROMPT,
       input: contentParts.join('\n'),
       max_output_tokens: 2400,
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'legal_ai_output',
+          strict: true,
+          schema: LEGAL_AI_OUTPUT_SCHEMA,
+        },
+      },
     });
 
     const fullText = response.output_text || '';
@@ -671,34 +723,46 @@ export async function POST(req: NextRequest) {
       return jsonError('لم نتمكن من توليد إجابة، حاول مرة أخرى', 500);
     }
 
-    const [rawAnswer, rawSuggestionsSection] = fullText.split(
-      '---SUGGESTED_QUESTIONS---'
-    );
+    let parsedOutput: LegalAiOutput;
 
-    const answer = rawAnswer.trim();
-
-    let suggestions: string[] = [];
-
-    if (rawSuggestionsSection) {
-      const suggestionsText = rawSuggestionsSection
-        .split('---END_SUGGESTED---')[0]
-        .trim();
-
-      suggestions = suggestionsText
-        .split('\n')
-        .map((suggestion) => suggestion.trim())
-        .filter((suggestion) => suggestion.length > 0)
-        .slice(0, 3);
+    try {
+      parsedOutput = JSON.parse(fullText) as LegalAiOutput;
+    } catch {
+      return jsonError('تعذر قراءة مخرجات الذكاء الصناعي، حاول مرة أخرى', 500);
     }
 
-    return NextResponse.json({ answer, suggestions });
+    const answer = parsedOutput.answer?.trim();
+
+    const suggestions = Array.isArray(parsedOutput.suggestions)
+      ? parsedOutput.suggestions
+          .map((suggestion) => suggestion.trim())
+          .filter((suggestion) => suggestion.length > 0)
+          .slice(0, 3)
+      : [];
+
+    const lawyerSummary = parsedOutput.lawyerSummary?.trim() || '';
+
+    if (!answer) {
+      return jsonError('لم نتمكن من توليد إجابة، حاول مرة أخرى', 500);
+    }
+
+    return NextResponse.json({
+      answer,
+      suggestions,
+      lawyerSummary,
+    });
   } catch (error: unknown) {
     console.error('Hukumx API Error:', error);
 
     if (error instanceof Error) {
       const msg = error.message.toLowerCase();
 
-      if (msg.includes('authentication') || msg.includes('api key')) {
+      if (
+        msg.includes('authentication') ||
+        msg.includes('api key') ||
+        msg.includes('unauthorized') ||
+        msg.includes('invalid_api_key')
+      ) {
         return jsonError('خطأ في الاتصال بالخدمة', 500);
       }
 
