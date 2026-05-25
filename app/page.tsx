@@ -20,6 +20,8 @@ import SuggestedQuestions from './components/SuggestedQuestions';
 import JudgmentIntakeForm from './components/JudgmentIntakeForm';
 import ContractBusinessIntakeForm from './components/ContractBusinessIntakeForm';
 
+type SourceConfidence = 'high' | 'medium' | 'low';
+
 export default function Home() {
   const [country, setCountry] = useState('');
   const [caseType, setCaseType] = useState('');
@@ -27,6 +29,10 @@ export default function Home() {
   const [answer, setAnswer] = useState('');
   const [lawyerSummary, setLawyerSummary] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [sourceNote, setSourceNote] = useState('');
+  const [sourceConfidence, setSourceConfidence] = useState<
+    SourceConfidence | undefined
+  >(undefined);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -73,13 +79,19 @@ export default function Home() {
 
   const hasAnyIntakeData = hasJudgmentIntakeData || hasContractIntakeData;
 
+  const resetAnswerOutput = () => {
+    setAnswer('');
+    setLawyerSummary('');
+    setSuggestions([]);
+    setSourceNote('');
+    setSourceConfidence(undefined);
+  };
+
   const startNewQuestion = () => {
     setCountry('');
     setCaseType('');
     setQuestion('');
-    setAnswer('');
-    setLawyerSummary('');
-    setSuggestions([]);
+    resetAnswerOutput();
     setLoading(false);
     setFormError('');
     setIntakeType(null);
@@ -90,9 +102,7 @@ export default function Home() {
   };
 
   const editIntakeDetails = () => {
-    setAnswer('');
-    setLawyerSummary('');
-    setSuggestions([]);
+    resetAnswerOutput();
 
     if (activeAnswerIntakeType) {
       setIntakeType(activeAnswerIntakeType);
@@ -129,9 +139,7 @@ export default function Home() {
     }
 
     setLoading(true);
-    setAnswer('');
-    setLawyerSummary('');
-    setSuggestions([]);
+    resetAnswerOutput();
     setIntakeType(null);
 
     try {
@@ -152,6 +160,8 @@ export default function Home() {
 
       if (!res.ok) {
         setAnswer(`> ⚠️ **${data.error || 'حدث خطأ'}**`);
+        setSourceNote('لم يتم الوصول إلى مصدر قانوني بسبب خطأ تقني.');
+        setSourceConfidence('low');
         return;
       }
 
@@ -173,9 +183,19 @@ export default function Home() {
       setAnswer(data.answer || '');
       setLawyerSummary(data.lawyerSummary || '');
       setSuggestions(data.suggestions || []);
+      setSourceNote(data.sourceNote || '');
+      setSourceConfidence(
+        data.sourceConfidence === 'high' ||
+          data.sourceConfidence === 'medium' ||
+          data.sourceConfidence === 'low'
+          ? data.sourceConfidence
+          : undefined
+      );
       setActiveAnswerIntakeType(submittedIntakeType || null);
     } catch {
       setAnswer('> ⚠️ **تعذّر الاتصال بالخادم، تحقق من اتصالك بالإنترنت**');
+      setSourceNote('لم يتم الوصول إلى مصدر قانوني بسبب تعذر الاتصال بالخادم.');
+      setSourceConfidence('low');
     } finally {
       setLoading(false);
     }
@@ -196,12 +216,7 @@ export default function Home() {
     }
 
     setFormError('');
-    askQuestion(
-      pendingQuestion,
-      'judgmentAppeal',
-      judgmentIntakeData,
-      null
-    );
+    askQuestion(pendingQuestion, 'judgmentAppeal', judgmentIntakeData, null);
   };
 
   const submitContractIntake = () => {
@@ -318,6 +333,8 @@ export default function Home() {
         <AnswerBox
           answer={answer}
           lawyerSummary={lawyerSummary}
+          sourceNote={sourceNote}
+          sourceConfidence={sourceConfidence}
           loading={loading}
           selectedCountry={selectedCountry}
           hasAnyIntakeData={hasAnyIntakeData}
