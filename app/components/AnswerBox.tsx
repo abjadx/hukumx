@@ -9,9 +9,13 @@ type SelectedCountry = {
   flag: string;
 };
 
+type SourceConfidence = 'high' | 'medium' | 'low';
+
 type AnswerBoxProps = {
   answer: string;
   lawyerSummary: string;
+  sourceNote?: string;
+  sourceConfidence?: SourceConfidence;
   loading: boolean;
   selectedCountry?: SelectedCountry;
   hasAnyIntakeData: string | boolean;
@@ -19,9 +23,34 @@ type AnswerBoxProps = {
   onStartNewQuestion: () => void;
 };
 
+function getSourceConfidenceLabel(sourceConfidence?: SourceConfidence) {
+  if (sourceConfidence === 'high') return 'عالية';
+  if (sourceConfidence === 'medium') return 'متوسطة';
+  if (sourceConfidence === 'low') return 'منخفضة';
+  return '';
+}
+
+function getSourceConfidenceClass(sourceConfidence?: SourceConfidence) {
+  if (sourceConfidence === 'high') {
+    return 'bg-green-500/15 text-green-300 border-green-500/40';
+  }
+
+  if (sourceConfidence === 'medium') {
+    return 'bg-yellow-500/15 text-yellow-300 border-yellow-500/40';
+  }
+
+  if (sourceConfidence === 'low') {
+    return 'bg-red-500/15 text-red-300 border-red-500/40';
+  }
+
+  return 'bg-slate-600 text-slate-300 border-slate-500';
+}
+
 export default function AnswerBox({
   answer,
   lawyerSummary,
+  sourceNote,
+  sourceConfidence,
   loading,
   selectedCountry,
   hasAnyIntakeData,
@@ -130,6 +159,35 @@ export default function AnswerBox({
       >
         {answer}
       </ReactMarkdown>
+
+      {(sourceNote || sourceConfidence) && (
+        <div className="mt-5 rounded-2xl border border-slate-600 bg-slate-800/70 p-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-amber-400">📚</span>
+              <h4 className="text-amber-300 font-bold text-sm">
+                قوة المصدر القانوني
+              </h4>
+            </div>
+
+            {sourceConfidence && (
+              <span
+                className={`text-xs font-bold px-3 py-1 rounded-full border ${getSourceConfidenceClass(
+                  sourceConfidence
+                )}`}
+              >
+                درجة الثقة: {getSourceConfidenceLabel(sourceConfidence)}
+              </span>
+            )}
+          </div>
+
+          {sourceNote && (
+            <p className="text-slate-300 text-sm leading-7">
+              {sourceNote}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="mt-6 pt-4 border-t border-slate-600 space-y-3">
         <div className="flex justify-between items-center gap-3 flex-wrap">
