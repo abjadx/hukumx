@@ -281,6 +281,15 @@ Please answer according to the system instructions and return only the required 
 `;
 }
 
+function extractArticleNumbers(text: string): string[] {
+  const matches = text.match(/المادة\s+(\d+)/g) || [];
+
+  const articleNumbers = matches
+    .map((match) => match.replace(/[^\d]/g, ''))
+    .filter(Boolean);
+
+  return Array.from(new Set(articleNumbers));
+}
 function normalizeLegalOutput(
   parsed: Partial<LegalAiOutput>,
   fallbackAnswer: string,
@@ -293,6 +302,15 @@ function normalizeLegalOutput(
     validConfidenceValues.includes(parsed.sourceConfidence)
       ? parsed.sourceConfidence
       : 'low';
+  const combinedSourceText = [
+    parsed.answer,
+    parsed.sourceNote,
+    parsed.lawyerSummary,
+  ]
+    .filter((item) => typeof item === 'string')
+    .join('\n');
+
+  const extractedArticles = extractArticleNumbers(combinedSourceText);
 
   return {
     answer:
@@ -314,10 +332,16 @@ function normalizeLegalOutput(
           : 'لم يتم استخدام مصدر قانوني مباشر في هذه الإجابة، ويجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء.',
     sourceConfidence,
     sourceTitle:
-      typeof parsed.sourceTitle === 'string' ? parsed.sourceTitle : '',
-    sourceArticles: Array.isArray(parsed.sourceArticles)
-      ? parsed.sourceArticles.filter((item) => typeof item === 'string')
-      : [],
+      typeof parsed.sourceTitle === 'string' && parsed.sourceTitle.trim()
+        ? parsed.sourceTitle
+        : useJordanRag && sourceConfidence !== 'low'
+          ? 'قانون أصول المحاكمات المدنية الأردني'
+          : '',
+
+    sourceArticles:
+      Array.isArray(parsed.sourceArticles) && parsed.sourceArticles.length > 0
+        ? parsed.sourceArticles.filter((item) => typeof item === 'string')
+        : extractedArticles,
   };
 }
 
@@ -372,6 +396,7 @@ function parseLegalOutput(
     const parsed = JSON.parse(text) as Partial<LegalAiOutput>;
     return normalizeLegalOutput(parsed, text, useJordanRag);
   } catch {
+    
     return {
       answer: text || 'تعذر توليد إجابة قانونية منظمة في هذه اللحظة.',
       suggestions: [],
