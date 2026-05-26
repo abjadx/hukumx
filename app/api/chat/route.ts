@@ -63,6 +63,8 @@ type LegalAiOutput = {
   sourceConfidence: SourceConfidence;
   sourceTitle: string;
   sourceArticles: string[];
+  primaryArticles: string[];
+  relatedArticles: string[];
 };
 
 const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
@@ -106,6 +108,22 @@ const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
         'List of legal article numbers used or clearly mentioned in the retrieved legal source. Empty array if no clear article was used.',
       items: {
         type: 'string',
+    primaryArticles: {
+      type: 'array',
+      description:
+        'Main legal article numbers that directly answer the user question. Empty array if no clear primary article was used.',
+      items: {
+        type: 'string',
+      },
+    },
+    relatedArticles: {
+      type: 'array',
+      description:
+        'Related or supporting legal article numbers mentioned or used in the answer. Empty array if no related articles were used.',
+      items: {
+        type: 'string',
+      },
+    },
       },
     },
   },
@@ -117,6 +135,8 @@ const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
     'sourceConfidence',
     'sourceTitle',
     'sourceArticles',
+    'primaryArticles',
+    'relatedArticles',
   ],
 };
 
@@ -209,6 +229,8 @@ The JSON must contain exactly these fields:
   "sourceConfidence": "high | medium | low",
   "sourceTitle": "Arabic title of the legal source used, or empty string if no clear source was used.",
   "sourceArticles": ["Article number 1", "Article number 2"]
+  "primaryArticles": ["Main article number"],
+  "relatedArticles": ["Related article number 1", "Related article number 2"]
 }
 
 Rules for answer:
@@ -256,6 +278,19 @@ Rules for sourceArticles:
 - Do not invent article numbers.
 - Use strings, for example: ["178", "170"].
 - If no clear article was used, return an empty array.
+
+Rules for primaryArticles:
+- Include only the article numbers that directly answer the user question.
+- If the user asks about an appeal period, the article that sets the period should be primary.
+- If the user asks about the consequence of missing a deadline, the article that states the consequence should be primary.
+- Do not invent article numbers.
+- If no direct article was used, return an empty array.
+
+Rules for relatedArticles:
+- Include supporting or related article numbers used to explain the answer.
+- Do not repeat articles already included in primaryArticles.
+- Do not invent article numbers.
+- If no related article was used, return an empty array.
 
 Important:
 - The output must be valid JSON.
@@ -315,6 +350,17 @@ function removeDuplicateSourceSection(answer: string): string {
     )
     .trim();
 }
+function uniqueStrings(items: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      items
+        .filter((item) => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 function normalizeLegalOutput(
   parsed: Partial<LegalAiOutput>,
   fallbackAnswer: string,
@@ -336,6 +382,19 @@ function normalizeLegalOutput(
     .join('\n');
 
   const extractedArticles = extractArticleNumbers(combinedSourceText);
+  const primaryArticles = Array.isArray(parsed.primaryArticles)
+    ? uniqueStrings(parsed.primaryArticles)
+    : [];
+
+  const relatedArticles = Array.isArray(parsed.relatedArticles)
+    ? uniqueStrings(parsed.relatedArticles).filter(
+        (article) => !primaryArticles.includes(article)
+      )
+    : [];
+
+  const sourceArticles = Array.isArray(parsed.sourceArticles) && parsed.sourceArticles.length > 0
+    ? uniqueStrings(parsed.sourceArticles)
+    : uniqueStrings([...primaryArticles, ...relatedArticles, ...extractedArticles]);
 
   return {
     answer:
@@ -363,10 +422,9 @@ function normalizeLegalOutput(
           ? 'قانون أصول المحاكمات المدنية الأردني'
           : '',
 
-    sourceArticles:
-      Array.isArray(parsed.sourceArticles) && parsed.sourceArticles.length > 0
-        ? parsed.sourceArticles.filter((item) => typeof item === 'string')
-        : extractedArticles,
+    sourceArticles,
+    primaryArticles,
+    relatedArticles,
   };
 }
 
@@ -432,6 +490,8 @@ function parseLegalOutput(
       sourceConfidence: 'low',
       sourceTitle: '',
       sourceArticles: [],
+      primaryArticles: [],
+      relatedArticles: [],
     };
   }
 }
@@ -526,6 +586,8 @@ export async function POST(req: NextRequest) {
         sourceConfidence: 'low',
         sourceTitle: '',
         sourceArticles: [],
+        primaryArticles: [],
+        relatedArticles: [],
       },
       { status: 500 }
     );

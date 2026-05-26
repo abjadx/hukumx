@@ -18,6 +18,8 @@ type AnswerBoxProps = {
   sourceConfidence?: SourceConfidence;
   sourceTitle?: string;
   sourceArticles?: string[];
+  primaryArticles?: string[];
+  relatedArticles?: string[];
   loading: boolean;
   selectedCountry?: SelectedCountry;
   hasAnyIntakeData: string | boolean;
@@ -55,6 +57,8 @@ export default function AnswerBox({
   sourceConfidence,
   sourceTitle,
   sourceArticles,
+  primaryArticles,
+  relatedArticles,
   loading,
   selectedCountry,
   hasAnyIntakeData,
@@ -187,7 +191,10 @@ export default function AnswerBox({
               </span>
             )}
           </div>
-          {(sourceTitle || (sourceArticles && sourceArticles.length > 0)) && (
+          {(sourceTitle ||
+            (primaryArticles && primaryArticles.length > 0) ||
+            (relatedArticles && relatedArticles.length > 0) ||
+            (sourceArticles && sourceArticles.length > 0)) && (
             <div className="mb-4 rounded-xl border border-slate-600 bg-slate-900/40 p-3">
               {sourceTitle && (
                 <div className="mb-2 text-sm text-slate-200">
@@ -196,12 +203,29 @@ export default function AnswerBox({
                 </div>
               )}
 
-              {sourceArticles && sourceArticles.length > 0 && (
-                <div className="text-sm text-slate-200">
-                  <span className="font-bold text-amber-300">المواد ذات العلاقة: </span>
-                  {sourceArticles.join('، ')}
+              {primaryArticles && primaryArticles.length > 0 && (
+                <div className="mb-2 text-sm text-slate-200">
+                  <span className="font-bold text-amber-300">المادة الأساسية: </span>
+                  {primaryArticles.join('، ')}
                 </div>
               )}
+
+              {relatedArticles && relatedArticles.length > 0 && (
+  <             div className="mb-2 text-sm text-slate-200">
+                  <span className="font-bold text-amber-300">مواد مرتبطة: </span>
+                  {relatedArticles.join('، ')}
+                </div>
+              )}
+
+              {(!primaryArticles || primaryArticles.length === 0) &&
+                (!relatedArticles || relatedArticles.length === 0) &&
+                sourceArticles &&
+                sourceArticles.length > 0 && (
+                  <div className="text-sm text-slate-200">
+                    <span className="font-bold text-amber-300">المواد ذات العلاقة: </span>
+                    {sourceArticles.join('، ')}
+                  </div>
+                )}
             </div>
           )}    
           {sourceNote && (

@@ -35,6 +35,8 @@ export default function Home() {
   >(undefined);
   const [sourceTitle, setSourceTitle] = useState('');
   const [sourceArticles, setSourceArticles] = useState<string[]>([]);
+  const [primaryArticles, setPrimaryArticles] = useState<string[]>([]);
+  const [relatedArticles, setRelatedArticles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -89,6 +91,8 @@ export default function Home() {
     setSourceConfidence(undefined);
     setSourceTitle('');
     setSourceArticles([]);
+    setPrimaryArticles([]);
+    setRelatedArticles([]);
   };
 
   const startNewQuestion = () => {
@@ -168,6 +172,8 @@ export default function Home() {
         setSourceConfidence('low');
         setSourceTitle('');
         setSourceArticles([]);
+        setPrimaryArticles([]);
+        setRelatedArticles([]);
         return;
       }
 
@@ -201,6 +207,12 @@ export default function Home() {
       setSourceArticles(
         Array.isArray(data.sourceArticles) ? data.sourceArticles : []
       );
+      setPrimaryArticles(
+        Array.isArray(data.primaryArticles) ? data.primaryArticles : []
+      );
+      setRelatedArticles(
+        Array.isArray(data.relatedArticles) ? data.relatedArticles : []
+      );
       setActiveAnswerIntakeType(submittedIntakeType || null);
     } catch {
       setAnswer('> ⚠️ **تعذّر الاتصال بالخادم، تحقق من اتصالك بالإنترنت**');
@@ -208,6 +220,8 @@ export default function Home() {
       setSourceConfidence('low');
       setSourceTitle('');
       setSourceArticles([]);
+      setPrimaryArticles([]);
+      setRelatedArticles([]);
     } finally {
       setLoading(false);
     }
@@ -349,6 +363,8 @@ export default function Home() {
           sourceConfidence={sourceConfidence}
           sourceTitle={sourceTitle}
           sourceArticles={sourceArticles}
+          primaryArticles={primaryArticles}
+          relatedArticles={relatedArticles}
           loading={loading}
           selectedCountry={selectedCountry}
           hasAnyIntakeData={hasAnyIntakeData}
