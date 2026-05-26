@@ -164,24 +164,10 @@ export default function AnswerBox({
         {answer}
       </ReactMarkdown>
 
-        {(sourceTitle || (sourceArticles && sourceArticles.length > 0)) && (
-          <div className="mb-4 rounded-xl border border-slate-600 bg-slate-900/40 p-3">
-            {sourceTitle && (
-              <div className="mb-2 text-sm text-slate-200">
-                <span className="font-bold text-amber-300">المصدر القانوني: </span>
-                {sourceTitle}
-              </div>
-            )}
-
-            {sourceArticles && sourceArticles.length > 0 && (
-              <div className="text-sm text-slate-200">
-                <span className="font-bold text-amber-300">المواد ذات العلاقة: </span>
-                {sourceArticles.join('، ')}
-              </div>
-            )}
-          </div>
-        )}
-      {(sourceNote || sourceConfidence) && (
+      {(sourceNote ||
+        sourceConfidence ||
+        sourceTitle ||
+        (sourceArticles && sourceArticles.length > 0)) && (
         <div className="mt-5 rounded-2xl border border-slate-600 bg-slate-800/70 p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
             <div className="flex items-center gap-2">
@@ -201,7 +187,23 @@ export default function AnswerBox({
               </span>
             )}
           </div>
+          {(sourceTitle || (sourceArticles && sourceArticles.length > 0)) && (
+            <div className="mb-4 rounded-xl border border-slate-600 bg-slate-900/40 p-3">
+              {sourceTitle && (
+                <div className="mb-2 text-sm text-slate-200">
+                  <span className="font-bold text-amber-300">المصدر القانوني: </span>
+                  {sourceTitle}
+                </div>
+              )}
 
+              {sourceArticles && sourceArticles.length > 0 && (
+                <div className="text-sm text-slate-200">
+                  <span className="font-bold text-amber-300">المواد ذات العلاقة: </span>
+                  {sourceArticles.join('، ')}
+                </div>
+              )}
+            </div>
+          )}    
           {sourceNote && (
             <p className="text-slate-300 text-sm leading-7">
               {sourceNote}

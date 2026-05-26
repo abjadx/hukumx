@@ -295,6 +295,26 @@ function extractArticleNumbers(text: string): string[] {
 
   return Array.from(new Set(articleNumbers));
 }
+function removeDuplicateSourceSection(answer: string): string {
+  return answer
+    .replace(
+      /(?:^|\n)#{1,6}\s*المصدر القانوني[\s\S]*?(?=\n#{1,6}\s|\n\*\*|$)/g,
+      ''
+    )
+    .replace(
+      /(?:^|\n)\*\*المصدر القانوني:\*\*[\s\S]*?(?=\n\n|$)/g,
+      ''
+    )
+    .replace(
+      /(?:^|\n)المصدر القانوني:\s*[\s\S]*?(?=\n\n|$)/g,
+      ''
+    )
+    .replace(
+      /(?:^|\n)المواد ذات العلاقة:\s*[\s\S]*?(?=\n\n|$)/g,
+      ''
+    )
+    .trim();
+}
 function normalizeLegalOutput(
   parsed: Partial<LegalAiOutput>,
   fallbackAnswer: string,
@@ -320,8 +340,8 @@ function normalizeLegalOutput(
   return {
     answer:
       typeof parsed.answer === 'string' && parsed.answer.trim()
-        ? parsed.answer
-        : fallbackAnswer,
+        ? removeDuplicateSourceSection(parsed.answer)
+        : removeDuplicateSourceSection(fallbackAnswer),
     suggestions: Array.isArray(parsed.suggestions)
       ? parsed.suggestions.filter((item) => typeof item === 'string')
       : [],
