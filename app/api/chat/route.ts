@@ -218,6 +218,11 @@ Rules for answer:
 - Include a legal caution when needed.
 - Keep the answer useful for non-lawyers.
 - If dates or deadlines are involved, explain how the period is generally calculated, but ask for exact dates when needed.
+- Do not include a separate section titled "المصدر القانوني" inside the answer.
+- Do not include a separate section titled "المواد ذات العلاقة" inside the answer.
+- Do not repeat sourceTitle or sourceArticles inside the answer body.
+- The legal source title and related articles must be returned only through sourceTitle and sourceArticles.
+- It is allowed to mention article numbers naturally inside the legal explanation when necessary, but do not create a separate source section in the answer.
 
 Rules for suggestions:
 - Return 3 useful follow-up questions in Arabic.
