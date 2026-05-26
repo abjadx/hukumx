@@ -61,6 +61,8 @@ type LegalAiOutput = {
   lawyerSummary: string;
   sourceNote: string;
   sourceConfidence: SourceConfidence;
+  sourceTitle: string;
+  sourceArticles: string[];
 };
 
 const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
@@ -93,6 +95,19 @@ const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
       description:
         'Confidence level of the legal source support: high when directly supported by retrieved legal text, medium when partially supported, low when no clear source was found.',
     },
+    sourceTitle: {
+      type: 'string',
+      description:
+        'Arabic title of the legal source used, such as the name of the law. Empty string if no clear source was used.',
+    },
+    sourceArticles: {
+      type: 'array',
+      description:
+        'List of legal article numbers used or clearly mentioned in the retrieved legal source. Empty array if no clear article was used.',
+      items: {
+        type: 'string',
+      },
+    },
   },
   required: [
     'answer',
@@ -100,6 +115,8 @@ const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
     'lawyerSummary',
     'sourceNote',
     'sourceConfidence',
+    'sourceTitle',
+    'sourceArticles',
   ],
 };
 
@@ -189,7 +206,9 @@ The JSON must contain exactly these fields:
   "suggestions": ["Suggested next question 1", "Suggested next question 2", "Suggested next question 3"],
   "lawyerSummary": "A concise professional summary that a lawyer can quickly review.",
   "sourceNote": "Arabic note explaining whether the answer was based on retrieved legal sources or general legal reasoning.",
-  "sourceConfidence": "high | medium | low"
+  "sourceConfidence": "high | medium | low",
+  "sourceTitle": "Arabic title of the legal source used, or empty string if no clear source was used.",
+  "sourceArticles": ["Article number 1", "Article number 2"]
 }
 
 Rules for answer:
@@ -221,9 +240,23 @@ Rules for sourceNote:
 - If no clear legal source was found, clearly say that no direct legal source was found and the answer should be reviewed by a lawyer.
 - Do not claim high confidence unless the answer is actually supported by retrieved legal material.
 
+Rules for sourceTitle:
+- Write the legal source title in Arabic.
+- If the retrieved source clearly identifies the law, use its title.
+- For the current Jordanian civil procedure source, use: "قانون أصول المحاكمات المدنية الأردني".
+- If no clear legal source was used, return an empty string.
+
+Rules for sourceArticles:
+- Include only article numbers that are clearly found in the retrieved legal source or clearly used in the answer.
+- Do not invent article numbers.
+- Use strings, for example: ["178", "170"].
+- If no clear article was used, return an empty array.
+
 Important:
 - The output must be valid JSON.
 - sourceConfidence must be only one of: high, medium, low.
+- sourceTitle must be a string.
+- sourceArticles must be an array of strings.
 `;
 }
 
@@ -280,6 +313,11 @@ function normalizeLegalOutput(
           ? 'تمت محاولة صياغة الإجابة بالاعتماد على المصادر القانونية الأردنية المتاحة، لكن لم يتم توليد ملاحظة مصدر منظمة بشكل كامل.'
           : 'لم يتم استخدام مصدر قانوني مباشر في هذه الإجابة، ويجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء.',
     sourceConfidence,
+    sourceTitle:
+      typeof parsed.sourceTitle === 'string' ? parsed.sourceTitle : '',
+    sourceArticles: Array.isArray(parsed.sourceArticles)
+      ? parsed.sourceArticles.filter((item) => typeof item === 'string')
+      : [],
   };
 }
 
@@ -312,7 +350,8 @@ function extractOutputText(response: unknown): string {
             contentItem !== null &&
             'type' in contentItem &&
             'text' in contentItem &&
-            (contentItem.type === 'output_text' || contentItem.type === 'text') &&
+            (contentItem.type === 'output_text' ||
+              contentItem.type === 'text') &&
             typeof contentItem.text === 'string'
           ) {
             return contentItem.text;
@@ -341,6 +380,8 @@ function parseLegalOutput(
       sourceNote:
         'لم يتم توليد ملاحظة مصدر منظمة لهذا الجواب، ويجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء.',
       sourceConfidence: 'low',
+      sourceTitle: '',
+      sourceArticles: [],
     };
   }
 }
@@ -433,6 +474,8 @@ export async function POST(req: NextRequest) {
         sourceNote:
           'لم يتم الوصول إلى مصدر قانوني بسبب خطأ تقني أثناء معالجة الطلب.',
         sourceConfidence: 'low',
+        sourceTitle: '',
+        sourceArticles: [],
       },
       { status: 500 }
     );

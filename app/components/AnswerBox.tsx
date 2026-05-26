@@ -16,6 +16,8 @@ type AnswerBoxProps = {
   lawyerSummary: string;
   sourceNote?: string;
   sourceConfidence?: SourceConfidence;
+  sourceTitle?: string;
+  sourceArticles?: string[];
   loading: boolean;
   selectedCountry?: SelectedCountry;
   hasAnyIntakeData: string | boolean;
@@ -51,6 +53,8 @@ export default function AnswerBox({
   lawyerSummary,
   sourceNote,
   sourceConfidence,
+  sourceTitle,
+  sourceArticles,
   loading,
   selectedCountry,
   hasAnyIntakeData,
@@ -160,6 +164,23 @@ export default function AnswerBox({
         {answer}
       </ReactMarkdown>
 
+        {(sourceTitle || (sourceArticles && sourceArticles.length > 0)) && (
+          <div className="mb-4 rounded-xl border border-slate-600 bg-slate-900/40 p-3">
+            {sourceTitle && (
+              <div className="mb-2 text-sm text-slate-200">
+                <span className="font-bold text-amber-300">المصدر القانوني: </span>
+                {sourceTitle}
+              </div>
+            )}
+
+            {sourceArticles && sourceArticles.length > 0 && (
+              <div className="text-sm text-slate-200">
+                <span className="font-bold text-amber-300">المواد ذات العلاقة: </span>
+                {sourceArticles.join('، ')}
+              </div>
+            )}
+          </div>
+        )}
       {(sourceNote || sourceConfidence) && (
         <div className="mt-5 rounded-2xl border border-slate-600 bg-slate-800/70 p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">

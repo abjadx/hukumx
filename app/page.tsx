@@ -33,6 +33,8 @@ export default function Home() {
   const [sourceConfidence, setSourceConfidence] = useState<
     SourceConfidence | undefined
   >(undefined);
+  const [sourceTitle, setSourceTitle] = useState('');
+  const [sourceArticles, setSourceArticles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -85,6 +87,8 @@ export default function Home() {
     setSuggestions([]);
     setSourceNote('');
     setSourceConfidence(undefined);
+    setSourceTitle('');
+    setSourceArticles([]);
   };
 
   const startNewQuestion = () => {
@@ -162,6 +166,8 @@ export default function Home() {
         setAnswer(`> ⚠️ **${data.error || 'حدث خطأ'}**`);
         setSourceNote('لم يتم الوصول إلى مصدر قانوني بسبب خطأ تقني.');
         setSourceConfidence('low');
+        setSourceTitle('');
+        setSourceArticles([]);
         return;
       }
 
@@ -191,11 +197,17 @@ export default function Home() {
           ? data.sourceConfidence
           : undefined
       );
+      setSourceTitle(data.sourceTitle || '');
+      setSourceArticles(
+        Array.isArray(data.sourceArticles) ? data.sourceArticles : []
+      );
       setActiveAnswerIntakeType(submittedIntakeType || null);
     } catch {
       setAnswer('> ⚠️ **تعذّر الاتصال بالخادم، تحقق من اتصالك بالإنترنت**');
       setSourceNote('لم يتم الوصول إلى مصدر قانوني بسبب تعذر الاتصال بالخادم.');
       setSourceConfidence('low');
+      setSourceTitle('');
+      setSourceArticles([]);
     } finally {
       setLoading(false);
     }
@@ -335,6 +347,8 @@ export default function Home() {
           lawyerSummary={lawyerSummary}
           sourceNote={sourceNote}
           sourceConfidence={sourceConfidence}
+          sourceTitle={sourceTitle}
+          sourceArticles={sourceArticles}
           loading={loading}
           selectedCountry={selectedCountry}
           hasAnyIntakeData={hasAnyIntakeData}
