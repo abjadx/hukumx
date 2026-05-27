@@ -274,9 +274,16 @@ Rules for sourceConfidence:
 
 Rules for sourceNote:
 - Write in Arabic.
-- If legal sources were used, mention that the answer was based on the available legal source.
-- If no clear legal source was found, clearly say that no direct legal source was found and the answer should be reviewed by a lawyer.
-- Do not claim high confidence unless the answer is actually supported by retrieved legal material.
+- Keep it short and professional, preferably one sentence only.
+- If legal sources were used, state briefly that the answer is based on the available legal source.
+- If no clear legal source was found, clearly say that no direct legal source was found and lawyer review is required.
+- Do not repeat the sourceTitle.
+- Do not repeat the article numbers.
+- Do not write long explanations inside sourceNote.
+- Good example when sources were used:
+  "الإجابة أعلاه مستندة إلى النصوص القانونية المتاحة، ويجب مراجعة التفاصيل مع محامٍ مختص لتطبيقها على الحالة بدقة."
+- Good example when no source was found:
+  "لم يتم العثور على مصدر قانوني مباشر، ويجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء."
 
 Rules for sourceTitle:
 - Write the legal source title in Arabic.
@@ -466,6 +473,15 @@ function prioritizeArticlesByContext(
   return uniqueStrings([...priority, ...articles]);
 }
 
+function shortenSourceNote(note: string): string {
+  const trimmedNote = note.trim();
+
+  if (trimmedNote.length <= 180) {
+    return trimmedNote;
+  }
+
+  return `${trimmedNote.slice(0, 177).trim()}...`;
+}
 function normalizeLegalOutput(
   parsed: Partial<LegalAiOutput>,
   fallbackAnswer: string,
@@ -548,10 +564,10 @@ function normalizeLegalOutput(
         : fallbackAnswer,
     sourceNote:
       typeof parsed.sourceNote === 'string' && parsed.sourceNote.trim()
-        ? parsed.sourceNote
+        ? shortenSourceNote(parsed.sourceNote)
         : useJordanRag
-          ? 'تمت محاولة صياغة الإجابة بالاعتماد على المصادر القانونية الأردنية المتاحة، لكن لم يتم توليد ملاحظة مصدر منظمة بشكل كامل.'
-          : 'لم يتم استخدام مصدر قانوني مباشر في هذه الإجابة، ويجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء.',
+          ? 'الإجابة مستندة إلى المصادر القانونية المتاحة، ويجب مراجعة التفاصيل مع محامٍ مختص.'
+          : 'لم يتم العثور على مصدر قانوني مباشر، ويجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء.',
     sourceConfidence,
     sourceTitle:
       typeof parsed.sourceTitle === 'string' && parsed.sourceTitle.trim()
