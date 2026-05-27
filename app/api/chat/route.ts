@@ -255,6 +255,15 @@ Rules for lawyerSummary:
 - Keep it concise and professional.
 - Focus on facts, legal issue, likely rule, and required next action.
 - Make it easy to copy and send to a lawyer.
+- Include related legal articles if available.
+- Use this structure when possible:
+  1. موضوع السؤال:
+  2. المواد الأساسية:
+  3. المواد المرتبطة:
+  4. النتيجة القانونية المختصرة:
+  5. الإجراء المقترح:
+- Do not exaggerate certainty.
+- If dates are involved, mention that the lawyer should verify the exact notification date, judgment type, and applicable deadline.
 
 Rules for sourceConfidence:
 - Use "high" only when the answer is directly supported by retrieved legal text or clear legal source content.
@@ -285,12 +294,16 @@ Rules for primaryArticles:
 - If the user asks about the consequence of missing a deadline, the article that states the consequence should be primary.
 - Do not invent article numbers.
 - If no direct article was used, return an empty array.
+- The lawyerSummary should be consistent with primaryArticles and relatedArticles.
 
 Rules for relatedArticles:
 - Include supporting or related article numbers used to explain the answer.
 - Do not repeat articles already included in primaryArticles.
 - Do not invent article numbers.
 - If no related article was used, return an empty array.
+- Return at most 5 related articles.
+- Do not include a long list of procedural articles unless each one is directly relevant to the answer.
+- Prefer the most important related articles only.
 
 Important:
 - The output must be valid JSON.
@@ -396,17 +409,17 @@ function normalizeLegalOutput(
       : uniqueStrings([...rawPrimaryArticles, ...rawRelatedArticles, ...extractedArticles]);
 
   const primaryArticles =
-    rawPrimaryArticles.length > 0
-      ? [rawPrimaryArticles[0]]
-      : rawSourceArticles.length > 0
-        ? [rawSourceArticles[0]]
-        : [];
+  rawPrimaryArticles.length > 0
+    ? rawPrimaryArticles.slice(0, 2)
+    : rawSourceArticles.length > 0
+      ? rawSourceArticles.slice(0, 2)
+      : [];
 
   const relatedArticles = uniqueStrings([
     ...rawRelatedArticles,
     ...rawPrimaryArticles.slice(1),
     ...rawSourceArticles.filter((article) => !primaryArticles.includes(article)),
-  ]);
+  ]).slice(0, 5);
 
   const sourceArticles = uniqueStrings([
     ...primaryArticles,
