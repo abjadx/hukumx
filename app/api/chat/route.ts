@@ -382,19 +382,36 @@ function normalizeLegalOutput(
     .join('\n');
 
   const extractedArticles = extractArticleNumbers(combinedSourceText);
-  const primaryArticles = Array.isArray(parsed.primaryArticles)
+  const rawPrimaryArticles = Array.isArray(parsed.primaryArticles)
     ? uniqueStrings(parsed.primaryArticles)
     : [];
 
-  const relatedArticles = Array.isArray(parsed.relatedArticles)
-    ? uniqueStrings(parsed.relatedArticles).filter(
-        (article) => !primaryArticles.includes(article)
-      )
+  const rawRelatedArticles = Array.isArray(parsed.relatedArticles)
+    ? uniqueStrings(parsed.relatedArticles)
     : [];
 
-  const sourceArticles = Array.isArray(parsed.sourceArticles) && parsed.sourceArticles.length > 0
-    ? uniqueStrings(parsed.sourceArticles)
-    : uniqueStrings([...primaryArticles, ...relatedArticles, ...extractedArticles]);
+  const rawSourceArticles =
+    Array.isArray(parsed.sourceArticles) && parsed.sourceArticles.length > 0
+      ? uniqueStrings(parsed.sourceArticles)
+      : uniqueStrings([...rawPrimaryArticles, ...rawRelatedArticles, ...extractedArticles]);
+
+  const primaryArticles =
+    rawPrimaryArticles.length > 0
+      ? [rawPrimaryArticles[0]]
+      : rawSourceArticles.length > 0
+        ? [rawSourceArticles[0]]
+        : [];
+
+  const relatedArticles = uniqueStrings([
+    ...rawRelatedArticles,
+    ...rawPrimaryArticles.slice(1),
+    ...rawSourceArticles.filter((article) => !primaryArticles.includes(article)),
+  ]);
+
+  const sourceArticles = uniqueStrings([
+    ...primaryArticles,
+    ...relatedArticles,
+  ]);
 
   return {
     answer:
