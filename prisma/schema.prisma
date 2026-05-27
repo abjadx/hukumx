@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Country {
+  id      String        @id @default(cuid())
+  code    String        @unique
+  nameAr  String
+  nameEn  String
+  sources LegalSource[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LegalSource {
+  id        String  @id @default(cuid())
+  countryId String
+  titleAr   String
+  titleEn   String?
+  slug      String  @unique
+  category  String?
+  fileName  String?
+  isActive  Boolean @default(true)
+
+  country  Country        @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  articles LegalArticle[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([countryId])
+}
+
+model LegalArticle {
+  id               String  @id @default(cuid())
+  legalSourceId    String
+  articleNumber    String
+  articleText      String
+  articleTextClean String?
+
+  legalSource LegalSource @relation(fields: [legalSourceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([legalSourceId, articleNumber])
+  @@index([articleNumber])
+}
