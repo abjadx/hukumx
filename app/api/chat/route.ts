@@ -105,9 +105,11 @@ const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
     sourceArticles: {
       type: 'array',
       description:
-        'List of legal article numbers used or clearly mentioned in the retrieved legal source. Empty array if no clear article was used.',
+        'List of all legal article numbers used or clearly mentioned in the retrieved legal source. Empty array if no clear article was used.',
       items: {
         type: 'string',
+      },
+    },
     primaryArticles: {
       type: 'array',
       description:
@@ -122,8 +124,6 @@ const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
         'Related or supporting legal article numbers mentioned or used in the answer. Empty array if no related articles were used.',
       items: {
         type: 'string',
-      },
-    },
       },
     },
   },
