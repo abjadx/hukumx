@@ -11,6 +11,32 @@ type PageProps = {
   }>;
 };
 
+type AdminSource = {
+  id: string;
+  titleAr: string;
+  slug: string;
+  isActive: boolean;
+  country: {
+    nameAr: string;
+  };
+  _count: {
+    articles: number;
+  };
+};
+
+type AdminArticle = {
+  id: string;
+  articleNumber: string;
+  articleText: string;
+  articleTextClean: string | null;
+  legalSource: {
+    titleAr: string;
+    country: {
+      nameAr: string;
+    };
+  };
+};
+
 function getSingleParam(value?: string | string[]) {
   if (Array.isArray(value)) return value[0] || '';
   return value || '';
@@ -350,7 +376,7 @@ export default async function LegalSourcesAdminPage({
               </thead>
 
               <tbody>
-                {sources.map((source) => (
+                {sources.map((source: AdminSource) => (
                   <tr key={source.id}>
                     <td style={styles.td}>{source.country.nameAr}</td>
                     <td style={{ ...styles.td, fontWeight: 900 }}>
@@ -391,7 +417,7 @@ export default async function LegalSourcesAdminPage({
           </form>
 
           <div>
-            {articles.map((article) => (
+            {articles.map((article: AdminArticle) => (
               <article key={article.id} style={styles.articleCard}>
                 <div style={styles.articleHeader}>
                   <span style={styles.articleNumber}>
