@@ -331,7 +331,7 @@ export default function AnswerBox({
       // (2) النص
       // (2 النص
       const numberedMatch = normalizedLine.match(
-        /^\s*\(?\s*(\d+)\s*[\.\)\(،]?\s+(.+)$/
+        /^\s*[\(\)]?\s*(\d+)\s*[\.\)\(،]?\s*(.+)$/
       );
 
       if (numberedMatch) {
