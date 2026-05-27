@@ -11,6 +11,12 @@ type SelectedCountry = {
 
 type SourceConfidence = 'high' | 'medium' | 'low';
 
+type SelectedArticle = {
+  articleNumber: string;
+  sourceTitle: string;
+  articleText: string;
+};
+
 type AnswerBoxProps = {
   answer: string;
   lawyerSummary: string;
@@ -36,18 +42,96 @@ function getSourceConfidenceLabel(sourceConfidence?: SourceConfidence) {
 
 function getSourceConfidenceClass(sourceConfidence?: SourceConfidence) {
   if (sourceConfidence === 'high') {
-    return 'bg-green-500/15 text-green-300 border-green-500/40';
+    return 'bg-green-500/20 text-green-300 border-green-500/50';
   }
 
   if (sourceConfidence === 'medium') {
-    return 'bg-yellow-500/15 text-yellow-300 border-yellow-500/40';
+    return 'bg-yellow-500/20 text-yellow-300 border-yellow-500/50';
   }
 
   if (sourceConfidence === 'low') {
-    return 'bg-red-500/15 text-red-300 border-red-500/40';
+    return 'bg-red-500/20 text-red-300 border-red-500/50';
   }
 
-  return 'bg-slate-600 text-slate-300 border-slate-500';
+  return 'bg-slate-700 text-slate-300 border-slate-500';
+}
+
+function uniqueArticles(articles?: string[]) {
+  if (!articles || articles.length === 0) return [];
+
+  return Array.from(
+    new Set(
+      articles
+        .map((article) => String(article).replace(/[^\d]/g, '').trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeLegalReferencesForDisplay(text: string) {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[（）]/g, (match) => (match === '（' ? '(' : ')'))
+
+    // تحويل مراجع الفقرات والمواد المعطوبة قبل أي معالجة لترقيم بداية السطر:
+    // 3() من المادة 123() / 3( ) من المادة 123( ) / 3( من المادة 123(
+    // => الفقرة رقم 3 من المادة رقم 123
+    .replace(
+      /(\d+)\s*(?:\(\s*\)|\(\s*|\)\s*)\s+من\s+المادة\s+(\d+)\s*(?:\(\s*\)|\(\s*|\)\s*)?/g,
+      'الفقرة رقم $1 من المادة رقم $2'
+    )
+
+    // 3() من المادة / 3( ) من المادة / 3( من المادة
+    // => الفقرة رقم 3 من المادة
+    .replace(
+      /(\d+)\s*(?:\(\s*\)|\(\s*|\)\s*)\s+من\s+المادة/g,
+      'الفقرة رقم $1 من المادة'
+    )
+
+    // أحكام المادة 170() / أحكام المادة 170( ) / أحكام المادة 170(
+    // => أحكام المادة رقم 170
+    .replace(
+      /أحكام\s+المادة\s+(\d+)\s*(?:\(\s*\)|\(\s*|\)\s*)/g,
+      'أحكام المادة رقم $1'
+    )
+
+    // المادة 170() / المادة 170( ) / المادة 170(
+    // => المادة رقم 170
+    .replace(
+      /المادة\s+(\d+)\s*(?:\(\s*\)|\(\s*|\)\s*)/g,
+      'المادة رقم $1'
+    )
+
+    // تحويل بداية السطر: 2) النص أو 2( النص أو 2( ) النص => 2. النص
+    .replace(/^\s*(\d+)\s*(?:\(\s*\)|\(\s*|\)\s*)\s*/gm, '$1. ')
+
+    // أي رقم متبقٍ بهذا الشكل 170() / 170( ) / 170(
+    // => رقم 170
+    .replace(/(\d+)\s*(?:\(\s*\)|\(\s*|\)\s*)/g, 'رقم $1')
+
+    // بداية السطر: -1- النص / - 1- النص => 1. النص
+    .replace(/^\s*-\s*(\d+)\s*[-–]\s*/gm, '$1. ')
+
+    // بداية السطر: -1النص => 1. النص
+    .replace(/^\s*-\s*(\d+)(?=[\u0600-\u06FF])/gm, '$1. ')
+
+    // بداية السطر: 1النص => 1. النص
+    .replace(/^\s*(\d+)(?=[\u0600-\u06FF])/gm, '$1. ')
+
+    // رقم ملتصق بنص عربي داخل السطر
+    .replace(/(\d+)(?=[\u0600-\u06FF])/g, '$1 ')
+
+    // تنظيف المسافات والأسطر
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+
+    // تحسين علامات الترقيم
+    .replace(/\s+([،.:؛])/g, '$1')
+    .replace(/([،.:؛])([^\s\n])/g, '$1 $2')
+    .trim();
 }
 
 export default function AnswerBox({
@@ -67,8 +151,22 @@ export default function AnswerBox({
 }: AnswerBoxProps) {
   const [copiedAnswer, setCopiedAnswer] = useState(false);
   const [copiedLawyerSummary, setCopiedLawyerSummary] = useState(false);
+  const [selectedArticle, setSelectedArticle] =
+    useState<SelectedArticle | null>(null);
+  const [articleLoading, setArticleLoading] = useState(false);
+  const [articleError, setArticleError] = useState('');
 
-  if (!answer || loading) return null;
+  const cleanedPrimaryArticles = uniqueArticles(primaryArticles);
+  const cleanedRelatedArticles = uniqueArticles(relatedArticles);
+  const cleanedSourceArticles = uniqueArticles(sourceArticles);
+
+  const hasSourceData =
+    Boolean(sourceNote) ||
+    Boolean(sourceConfidence) ||
+    Boolean(sourceTitle) ||
+    cleanedPrimaryArticles.length > 0 ||
+    cleanedRelatedArticles.length > 0 ||
+    cleanedSourceArticles.length > 0;
 
   const copyLawyerSummary = async () => {
     if (!lawyerSummary) return;
@@ -89,6 +187,183 @@ export default function AnswerBox({
       setCopiedAnswer(false);
     }, 2000);
   };
+
+  const openArticleText = async (articleNumber: string) => {
+    try {
+      setArticleLoading(true);
+      setArticleError('');
+      setSelectedArticle(null);
+
+      const res = await fetch('/api/legal-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          articleNumber,
+          sourceTitle,
+          country: selectedCountry?.name,
+        }),
+      });
+
+      const text = await res.text();
+
+      let data: {
+        error?: string;
+        articleNumber?: string;
+        sourceTitle?: string;
+        articleText?: string;
+      } = {};
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        console.error('Invalid legal article API response:', text);
+        setArticleError(
+          `عاد الخادم برد غير صالح أثناء جلب نص المادة. كود الحالة: ${res.status}`
+        );
+        return;
+      }
+
+      if (!res.ok) {
+        setArticleError(
+          data.error || `تعذر جلب نص المادة. كود الحالة: ${res.status}`
+        );
+        return;
+      }
+
+      setSelectedArticle({
+        articleNumber: data.articleNumber || articleNumber,
+        sourceTitle:
+          data.sourceTitle ||
+          sourceTitle ||
+          'قانون أصول المحاكمات المدنية الأردني',
+        articleText: normalizeLegalReferencesForDisplay(data.articleText || ''),
+      });
+    } catch {
+      setArticleError('تعذر الاتصال بالخادم لجلب نص المادة.');
+    } finally {
+      setArticleLoading(false);
+    }
+  };
+
+  const renderArticleButtons = (
+    articles: string[] | undefined,
+    variant: 'primary' | 'related' | 'source'
+  ) => {
+    const cleanedArticles = uniqueArticles(articles);
+
+    if (cleanedArticles.length === 0) return null;
+
+    const buttonClass =
+      variant === 'primary'
+        ? 'rounded-full border border-amber-500/50 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300 hover:bg-amber-500/20 transition-colors cursor-pointer'
+        : 'rounded-full border border-slate-400/60 bg-slate-700/50 px-3 py-1 text-xs font-bold text-slate-100 hover:bg-slate-600 transition-colors cursor-pointer';
+
+    return (
+      <div className="inline-flex flex-wrap gap-2">
+        {cleanedArticles.map((article) => (
+          <button
+            key={`${variant}-${article}`}
+            type="button"
+            onClick={() => openArticleText(article)}
+            className={buttonClass}
+            title={`عرض نص المادة ${article}`}
+          >
+            {article}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderArticleText = (text: string) => {
+  const cleanedText = text
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[（]/g, '(')
+    .replace(/[）]/g, ')')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return cleanedText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const normalizedLine = line
+        // 3( ) من المادة 123( ) => الفقرة رقم 3 من المادة رقم 123
+        .replace(
+          /(\d+)\s*\(\s*\)\s+من\s+المادة\s+(\d+)\s*\(\s*\)/g,
+          'الفقرة رقم $1 من المادة رقم $2'
+        )
+
+        // 3( ) من المادة 123 => الفقرة رقم 3 من المادة رقم 123
+        .replace(
+          /(\d+)\s*\(\s*\)\s+من\s+المادة\s+(\d+)/g,
+          'الفقرة رقم $1 من المادة رقم $2'
+        )
+
+        // 3( من المادة 123( => الفقرة رقم 3 من المادة رقم 123
+        .replace(
+          /(\d+)\s*\(\s+من\s+المادة\s+(\d+)\s*\(/g,
+          'الفقرة رقم $1 من المادة رقم $2'
+        )
+
+        // المادة 170( ) / المادة 170() / المادة 170( => المادة رقم 170
+        .replace(/المادة\s+(\d+)\s*\(\s*\)/g, 'المادة رقم $1')
+        .replace(/المادة\s+(\d+)\s*\(/g, 'المادة رقم $1')
+
+        // 12() من هذا القانون => المادة رقم 12 من هذا القانون
+        .replace(/(\d+)\s*\(\s*\)\s+من\s+هذا\s+القانون/g, 'المادة رقم $1 من هذا القانون')
+
+        // 12( من هذا القانون => المادة رقم 12 من هذا القانون
+        .replace(/(\d+)\s*\(\s+من\s+هذا\s+القانون/g, 'المادة رقم $1 من هذا القانون')
+
+        // أي رقم متبقٍ بهذا الشكل 170( ) / 170() / 170( => رقم 170
+        .replace(/(\d+)\s*\(\s*\)/g, 'رقم $1')
+        .replace(/(\d+)\s*\(/g, 'رقم $1')
+        .trim();
+
+      // يلتقط:
+      // 1. النص
+      // 2) النص
+      // 2( النص
+      // (2) النص
+      // (2 النص
+      const numberedMatch = normalizedLine.match(
+        /^\s*\(?\s*(\d+)\s*[\.\)\(،]?\s+(.+)$/
+      );
+
+      if (numberedMatch) {
+        return (
+          <div
+            key={`${numberedMatch[1]}-${index}`}
+            className="mb-4 flex items-start gap-3 text-right"
+            dir="rtl"
+          >
+            <span className="mt-1 flex h-7 min-w-7 items-center justify-center rounded-full bg-amber-500/20 text-sm font-bold text-amber-300">
+              {numberedMatch[1]}
+            </span>
+
+            <p className="flex-1 text-base leading-9 text-slate-100">
+              {numberedMatch[2]}
+            </p>
+          </div>
+        );
+      }
+
+      return (
+        <p
+          key={`line-${index}`}
+          className="mb-4 text-base leading-9 text-slate-100"
+        >
+          {normalizedLine}
+        </p>
+      );
+    });
+};
+
+  if (!answer || loading) return null;
 
   return (
     <div
@@ -168,10 +443,7 @@ export default function AnswerBox({
         {answer}
       </ReactMarkdown>
 
-      {(sourceNote ||
-        sourceConfidence ||
-        sourceTitle ||
-        (sourceArticles && sourceArticles.length > 0)) && (
+      {hasSourceData && (
         <div className="mt-5 rounded-2xl border border-slate-600 bg-slate-800/70 p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
             <div className="flex items-center gap-2">
@@ -191,45 +463,97 @@ export default function AnswerBox({
               </span>
             )}
           </div>
+
           {(sourceTitle ||
-            (primaryArticles && primaryArticles.length > 0) ||
-            (relatedArticles && relatedArticles.length > 0) ||
-            (sourceArticles && sourceArticles.length > 0)) && (
+            cleanedPrimaryArticles.length > 0 ||
+            cleanedRelatedArticles.length > 0 ||
+            cleanedSourceArticles.length > 0) && (
             <div className="mb-4 rounded-xl border border-slate-600 bg-slate-900/40 p-3">
               {sourceTitle && (
-                <div className="mb-2 text-sm text-slate-200">
-                  <span className="font-bold text-amber-300">المصدر القانوني: </span>
+                <div className="mb-3 text-sm text-slate-200">
+                  <span className="font-bold text-amber-300">
+                    المصدر القانوني:{' '}
+                  </span>
                   {sourceTitle}
                 </div>
               )}
 
-              {primaryArticles && primaryArticles.length > 0 && (
-                <div className="mb-2 text-sm text-slate-200">
-                  <span className="font-bold text-amber-300">المادة الأساسية: </span>
-                  {primaryArticles.join('، ')}
+              {cleanedPrimaryArticles.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-slate-200">
+                  <span className="font-bold text-amber-300">
+                    المادة الأساسية:
+                  </span>
+                  {renderArticleButtons(cleanedPrimaryArticles, 'primary')}
                 </div>
               )}
 
-              {relatedArticles && relatedArticles.length > 0 && (
-  <             div className="mb-2 text-sm text-slate-200">
-                  <span className="font-bold text-amber-300">مواد مرتبطة: </span>
-                  {relatedArticles.join('، ')}
+              {cleanedRelatedArticles.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-slate-200">
+                  <span className="font-bold text-amber-300">
+                    مواد مرتبطة:
+                  </span>
+                  {renderArticleButtons(cleanedRelatedArticles, 'related')}
                 </div>
               )}
 
-              {(!primaryArticles || primaryArticles.length === 0) &&
-                (!relatedArticles || relatedArticles.length === 0) &&
-                sourceArticles &&
-                sourceArticles.length > 0 && (
-                  <div className="text-sm text-slate-200">
-                    <span className="font-bold text-amber-300">المواد ذات العلاقة: </span>
-                    {sourceArticles.join('، ')}
+              {cleanedPrimaryArticles.length === 0 &&
+                cleanedRelatedArticles.length === 0 &&
+                cleanedSourceArticles.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-200">
+                    <span className="font-bold text-amber-300">
+                      المواد ذات العلاقة:
+                    </span>
+                    {renderArticleButtons(cleanedSourceArticles, 'source')}
                   </div>
                 )}
             </div>
-          )}    
+          )}
+
+          {articleLoading && (
+            <div className="mt-4 rounded-xl border border-slate-600 bg-slate-900/50 p-4 text-sm text-slate-300">
+              جاري جلب نص المادة...
+            </div>
+          )}
+
+          {articleError && (
+            <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
+              {articleError}
+            </div>
+          )}
+
+          {selectedArticle && (
+            <div className="mt-4 rounded-xl border border-amber-500/30 bg-slate-900/70 p-4">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="text-right">
+                  <h5 className="text-base font-bold text-amber-300">
+                    المادة {selectedArticle.articleNumber}
+                  </h5>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {selectedArticle.sourceTitle}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedArticle(null)}
+                  className="rounded-lg border border-slate-500 bg-slate-700 px-4 py-2 text-xs font-bold text-slate-100 hover:bg-slate-600 transition-colors"
+                >
+                  إغلاق
+                </button>
+              </div>
+
+              <div
+                className="rounded-xl bg-slate-950/60 p-5 text-right"
+                dir="rtl"
+                style={{ color: '#f8fafc' }}
+              >
+                {renderArticleText(selectedArticle.articleText)}
+              </div>
+            </div>
+          )}
+
           {sourceNote && (
-            <p className="text-slate-300 text-sm leading-7">
+            <p className="mt-4 text-slate-300 text-sm leading-7">
               {sourceNote}
             </p>
           )}
