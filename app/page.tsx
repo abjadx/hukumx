@@ -29,14 +29,17 @@ export default function Home() {
   const [answer, setAnswer] = useState('');
   const [lawyerSummary, setLawyerSummary] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
+
   const [sourceNote, setSourceNote] = useState('');
   const [sourceConfidence, setSourceConfidence] = useState<
     SourceConfidence | undefined
   >(undefined);
+
   const [sourceTitle, setSourceTitle] = useState('');
   const [sourceArticles, setSourceArticles] = useState<string[]>([]);
   const [primaryArticles, setPrimaryArticles] = useState<string[]>([]);
   const [relatedArticles, setRelatedArticles] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -194,7 +197,8 @@ export default function Home() {
       setQuestion(finalQuestion);
       setAnswer(data.answer || '');
       setLawyerSummary(data.lawyerSummary || '');
-      setSuggestions(data.suggestions || []);
+      setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+
       setSourceNote(data.sourceNote || '');
       setSourceConfidence(
         data.sourceConfidence === 'high' ||
@@ -203,6 +207,7 @@ export default function Home() {
           ? data.sourceConfidence
           : undefined
       );
+
       setSourceTitle(data.sourceTitle || '');
       setSourceArticles(
         Array.isArray(data.sourceArticles) ? data.sourceArticles : []
@@ -213,6 +218,7 @@ export default function Home() {
       setRelatedArticles(
         Array.isArray(data.relatedArticles) ? data.relatedArticles : []
       );
+
       setActiveAnswerIntakeType(submittedIntakeType || null);
     } catch {
       setAnswer('> ⚠️ **تعذّر الاتصال بالخادم، تحقق من اتصالك بالإنترنت**');

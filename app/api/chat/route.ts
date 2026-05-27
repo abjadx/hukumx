@@ -146,6 +146,7 @@ function normalizeCountry(country?: string | null): string {
 
 function isJordan(country?: string | null): boolean {
   const normalized = normalizeCountry(country);
+
   return (
     normalized === 'الأردن' ||
     normalized === 'الاردن' ||
@@ -228,7 +229,7 @@ The JSON must contain exactly these fields:
   "sourceNote": "Arabic note explaining whether the answer was based on retrieved legal sources or general legal reasoning.",
   "sourceConfidence": "high | medium | low",
   "sourceTitle": "Arabic title of the legal source used, or empty string if no clear source was used.",
-  "sourceArticles": ["Article number 1", "Article number 2"]
+  "sourceArticles": ["Article number 1", "Article number 2"],
   "primaryArticles": ["Main article number"],
   "relatedArticles": ["Related article number 1", "Related article number 2"]
 }
@@ -255,6 +256,7 @@ Rules for lawyerSummary:
 - Keep it concise and professional.
 - Focus on facts, legal issue, likely rule, and required next action.
 - Make it easy to copy and send to a lawyer.
+- Include the primary legal articles if available.
 - Include related legal articles if available.
 - Use this structure when possible:
   1. موضوع السؤال:
@@ -292,6 +294,8 @@ Rules for primaryArticles:
 - Include only the article numbers that directly answer the user question.
 - If the user asks about an appeal period, the article that sets the period should be primary.
 - If the user asks about the consequence of missing a deadline, the article that states the consequence should be primary.
+- If the user asks about retrial / إعادة المحاكمة, the retrial article should be primary.
+- If the user asks about third-party objection / اعتراض الغير, the third-party objection article should be primary.
 - Do not invent article numbers.
 - If no direct article was used, return an empty array.
 - The lawyerSummary should be consistent with primaryArticles and relatedArticles.
@@ -300,16 +304,18 @@ Rules for relatedArticles:
 - Include supporting or related article numbers used to explain the answer.
 - Do not repeat articles already included in primaryArticles.
 - Do not invent article numbers.
-- If no related article was used, return an empty array.
 - Return at most 5 related articles.
 - Do not include a long list of procedural articles unless each one is directly relevant to the answer.
 - Prefer the most important related articles only.
+- If no related article was used, return an empty array.
 
 Important:
 - The output must be valid JSON.
 - sourceConfidence must be only one of: high, medium, low.
 - sourceTitle must be a string.
 - sourceArticles must be an array of strings.
+- primaryArticles must be an array of strings.
+- relatedArticles must be an array of strings.
 `;
 }
 
@@ -334,15 +340,6 @@ Please answer according to the system instructions and return only the required 
 `;
 }
 
-function extractArticleNumbers(text: string): string[] {
-  const matches = text.match(/المادة\s+(\d+)/g) || [];
-
-  const articleNumbers = matches
-    .map((match) => match.replace(/[^\d]/g, ''))
-    .filter(Boolean);
-
-  return Array.from(new Set(articleNumbers));
-}
 function removeDuplicateSourceSection(answer: string): string {
   return answer
     .replace(
@@ -363,6 +360,27 @@ function removeDuplicateSourceSection(answer: string): string {
     )
     .trim();
 }
+
+function extractArticleNumbers(text: string): string[] {
+  const articleNumbers: string[] = [];
+
+  const singleArticleMatches = text.matchAll(/المادة\s+(\d+)/g);
+  for (const match of singleArticleMatches) {
+    articleNumbers.push(match[1]);
+  }
+
+  const groupedArticleMatches = text.matchAll(
+    /(?:المواد|المادتين)\s*(?:ذات\s+العلاقة)?\s*[:：]?\s*([\d\s،,و]+)/g
+  );
+
+  for (const match of groupedArticleMatches) {
+    const numbers = match[1].match(/\d+/g) || [];
+    articleNumbers.push(...numbers);
+  }
+
+  return uniqueStrings(articleNumbers);
+}
+
 function uniqueStrings(items: unknown[]): string[] {
   return Array.from(
     new Set(
@@ -374,10 +392,85 @@ function uniqueStrings(items: unknown[]): string[] {
   );
 }
 
+function includesAny(text: string, terms: string[]): boolean {
+  return terms.some((term) => text.includes(term));
+}
+
+function prioritizeArticlesByContext(
+  articles: string[],
+  text: string
+): string[] {
+  const normalizedText = text.replace(/\s+/g, ' ');
+  const priority: string[] = [];
+
+  const mentionsAppealPeriod = includesAny(normalizedText, [
+    'مدة الاستئناف',
+    'ميعاد الاستئناف',
+    'موعد الاستئناف',
+    'مدة الطعن بالاستئناف',
+  ]);
+
+  const mentionsMissedDeadline = includesAny(normalizedText, [
+    'فاتت مدة الاستئناف',
+    'فوات مدة الاستئناف',
+    'بعد فوات',
+    'انقضاء المدة',
+    'انقضاء مدة الاستئناف',
+    'رد الطعن شكلا',
+    'رد الطعن شكلًا',
+    'فوات الميعاد',
+  ]);
+
+  const mentionsRetrial = includesAny(normalizedText, [
+    'إعادة المحاكمة',
+    'اعادة المحاكمة',
+    'طلب إعادة المحاكمة',
+    'طلب اعادة المحاكمة',
+  ]);
+
+  const mentionsThirdPartyObjection = includesAny(normalizedText, [
+    'اعتراض الغير',
+    'اعتراض غير',
+  ]);
+
+  const mentionsCassation = includesAny(normalizedText, [
+    'التمييز',
+    'محكمة التمييز',
+    'الطعن بالتمييز',
+  ]);
+
+  if (mentionsMissedDeadline && articles.includes('172')) {
+    priority.push('172');
+  }
+
+  if (mentionsAppealPeriod && articles.includes('178')) {
+    priority.push('178');
+  }
+
+  if (mentionsRetrial && articles.includes('213')) {
+    priority.push('213');
+  }
+
+  if (mentionsThirdPartyObjection && articles.includes('207')) {
+    priority.push('207');
+  }
+
+  if (mentionsThirdPartyObjection && articles.includes('208')) {
+    priority.push('208');
+  }
+
+  if (mentionsCassation && articles.includes('191')) {
+    priority.push('191');
+  }
+
+  return uniqueStrings([...priority, ...articles]);
+}
+
 function normalizeLegalOutput(
   parsed: Partial<LegalAiOutput>,
   fallbackAnswer: string,
-  useJordanRag: boolean
+  useJordanRag: boolean,
+  userQuestion: string
 ): LegalAiOutput {
   const validConfidenceValues: SourceConfidence[] = ['high', 'medium', 'low'];
 
@@ -386,15 +479,24 @@ function normalizeLegalOutput(
     validConfidenceValues.includes(parsed.sourceConfidence)
       ? parsed.sourceConfidence
       : 'low';
+
+  const cleanedAnswer =
+    typeof parsed.answer === 'string' && parsed.answer.trim()
+      ? removeDuplicateSourceSection(parsed.answer)
+      : removeDuplicateSourceSection(fallbackAnswer);
+
   const combinedSourceText = [
+    userQuestion,
     parsed.answer,
     parsed.sourceNote,
     parsed.lawyerSummary,
+    fallbackAnswer,
   ]
     .filter((item) => typeof item === 'string')
     .join('\n');
 
   const extractedArticles = extractArticleNumbers(combinedSourceText);
+
   const rawPrimaryArticles = Array.isArray(parsed.primaryArticles)
     ? uniqueStrings(parsed.primaryArticles)
     : [];
@@ -406,31 +508,37 @@ function normalizeLegalOutput(
   const rawSourceArticles =
     Array.isArray(parsed.sourceArticles) && parsed.sourceArticles.length > 0
       ? uniqueStrings(parsed.sourceArticles)
-      : uniqueStrings([...rawPrimaryArticles, ...rawRelatedArticles, ...extractedArticles]);
+      : uniqueStrings([
+          ...rawPrimaryArticles,
+          ...rawRelatedArticles,
+          ...extractedArticles,
+        ]);
+
+  const prioritizedArticles = prioritizeArticlesByContext(
+    uniqueStrings([
+      ...rawPrimaryArticles,
+      ...rawSourceArticles,
+      ...extractedArticles,
+    ]),
+    combinedSourceText
+  );
 
   const primaryArticles =
-  rawPrimaryArticles.length > 0
-    ? rawPrimaryArticles.slice(0, 2)
-    : rawSourceArticles.length > 0
-      ? rawSourceArticles.slice(0, 2)
-      : [];
+    prioritizedArticles.length > 0 ? prioritizedArticles.slice(0, 2) : [];
 
   const relatedArticles = uniqueStrings([
     ...rawRelatedArticles,
-    ...rawPrimaryArticles.slice(1),
-    ...rawSourceArticles.filter((article) => !primaryArticles.includes(article)),
-  ]).slice(0, 5);
+    ...rawPrimaryArticles,
+    ...rawSourceArticles,
+    ...extractedArticles,
+  ])
+    .filter((article) => !primaryArticles.includes(article))
+    .slice(0, 5);
 
-  const sourceArticles = uniqueStrings([
-    ...primaryArticles,
-    ...relatedArticles,
-  ]);
+  const sourceArticles = uniqueStrings([...primaryArticles, ...relatedArticles]);
 
   return {
-    answer:
-      typeof parsed.answer === 'string' && parsed.answer.trim()
-        ? removeDuplicateSourceSection(parsed.answer)
-        : removeDuplicateSourceSection(fallbackAnswer),
+    answer: cleanedAnswer,
     suggestions: Array.isArray(parsed.suggestions)
       ? parsed.suggestions.filter((item) => typeof item === 'string')
       : [],
@@ -451,7 +559,6 @@ function normalizeLegalOutput(
         : useJordanRag && sourceConfidence !== 'low'
           ? 'قانون أصول المحاكمات المدنية الأردني'
           : '',
-
     sourceArticles,
     primaryArticles,
     relatedArticles,
@@ -503,13 +610,14 @@ function extractOutputText(response: unknown): string {
 
 function parseLegalOutput(
   text: string,
-  useJordanRag: boolean
+  useJordanRag: boolean,
+  userQuestion: string
 ): LegalAiOutput {
   try {
     const parsed = JSON.parse(text) as Partial<LegalAiOutput>;
-    return normalizeLegalOutput(parsed, text, useJordanRag);
+
+    return normalizeLegalOutput(parsed, text, useJordanRag, userQuestion);
   } catch {
-    
     return {
       answer: text || 'تعذر توليد إجابة قانونية منظمة في هذه اللحظة.',
       suggestions: [],
@@ -594,7 +702,7 @@ export async function POST(req: NextRequest) {
     });
 
     const outputText = extractOutputText(response);
-    const legalOutput = parseLegalOutput(outputText, useJordanRag);
+    const legalOutput = parseLegalOutput(outputText, useJordanRag, question);
 
     return NextResponse.json(legalOutput);
   } catch (error) {
