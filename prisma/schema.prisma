@@ -37,11 +37,28 @@ model LegalSource {
 }
 
 model LegalArticle {
-  id               String  @id @default(cuid())
-  legalSourceId    String
-  articleNumber    String
-  articleText      String
+  id            String @id @default(cuid())
+  legalSourceId String
+  articleNumber String
+
+  // النص كما تم إدخاله أو استخراجه أول مرة
+  articleText String
+
+  // النص بعد تنظيف آلي أولي
   articleTextClean String?
+
+  // النص الذي يتم اعتماده بعد المراجعة البشرية/القانونية
+  articleTextReviewed String?
+
+  // حالة مراجعة النص: pending / needs_review / approved
+  reviewStatus String @default("pending")
+
+  // ملاحظات المراجع أو سبب طلب المراجعة
+  reviewNotes String?
+
+  // معلومات اعتماد النص
+  reviewedAt DateTime?
+  reviewedBy String?
 
   legalSource LegalSource @relation(fields: [legalSourceId], references: [id], onDelete: Cascade)
 
@@ -50,4 +67,5 @@ model LegalArticle {
 
   @@unique([legalSourceId, articleNumber])
   @@index([articleNumber])
+  @@index([reviewStatus])
 }
