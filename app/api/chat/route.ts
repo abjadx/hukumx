@@ -236,6 +236,13 @@ Legal source rules:
 - Do not cite an article unless it appeared clearly in the retrieved legal content or Hukumx database legal context.
 - For Jordan questions, prioritize the retrieved Jordanian legal source when available.
 
+Legal answer safety rules:
+- If the available legal source does not directly support the answer, avoid giving a decisive legal conclusion.
+- If the question involves deadlines, appeal periods, notification dates, court procedures, loss of rights, or urgent action, be especially conservative.
+- If no clear primary article supports the answer, state that the answer needs lawyer review before taking action.
+- Never tell the user that a deadline is certainly valid, expired, extended, or still open unless the relevant article and facts clearly support that.
+- If dates are missing, ask for the exact date of judgment, notification, and judgment type when relevant.
+
 Structured output rules:
 You must always return a valid JSON object only.
 Do not wrap the JSON in Markdown.
@@ -821,6 +828,145 @@ function shortenSourceNote(note: string): string {
 
   return `${trimmedNote.slice(0, 177).trim()}...`;
 }
+
+function isTimingSensitiveQuestion(question: string): boolean {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+
+  return includesAny(normalizedQuestion, [
+    'مده',
+    'ميعاد',
+    'موعد',
+    'اجل',
+    'اخر يوم',
+    'فوات',
+    'انقضاء',
+    'استئناف',
+    'تمييز',
+    'اعتراض',
+    'تبليغ',
+    'تبلغت',
+    'حكم',
+    'قرار',
+    'رد شكلا',
+    'رد شكل',
+    'سقط حقي',
+  ]);
+}
+
+function isActionSensitiveQuestion(question: string): boolean {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+
+  return includesAny(normalizedQuestion, [
+    'ماذا افعل',
+    'شو اعمل',
+    'كيف اتصرف',
+    'هل استطيع',
+    'هل يجوز',
+    'ارفع دعوي',
+    'اطعن',
+    'استأنف',
+    'استانف',
+    'انفذ',
+    'تنفيذ',
+    'حجز',
+    'دعوى',
+    'محكمه',
+    'محكمة',
+  ]);
+}
+
+function answerAlreadyHasSafetyWarning(answer: string): boolean {
+  const normalizedAnswer = normalizeArabicForSearch(answer);
+
+  return includesAny(normalizedAnswer, [
+    'لا تغني عن مراجعه محام',
+    'لا يغني عن مراجعه محام',
+    'يجب مراجعه محام',
+    'يلزم مراجعه محام',
+    'محام مختص',
+  ]);
+}
+
+function prependSafetyWarning(answer: string, warning: string): string {
+  const cleanedAnswer = answer.trim();
+
+  if (!cleanedAnswer) {
+    return warning;
+  }
+
+  if (answerAlreadyHasSafetyWarning(cleanedAnswer)) {
+    return cleanedAnswer;
+  }
+
+  return `> ${warning}\n\n${cleanedAnswer}`;
+}
+
+function buildSaferLawyerSummary(summary: string, warning: string): string {
+  const cleanedSummary = summary.trim();
+
+  if (!cleanedSummary) {
+    return warning;
+  }
+
+  if (answerAlreadyHasSafetyWarning(cleanedSummary)) {
+    return cleanedSummary;
+  }
+
+  return `${warning}\n\n${cleanedSummary}`;
+}
+
+function applyLegalAnswerSafetyCheck(
+  output: LegalAiOutput,
+  params: {
+    userQuestion: string;
+    useJordanLegalSources: boolean;
+    hasDatabaseLegalContext: boolean;
+  }
+): LegalAiOutput {
+  const hasPrimaryArticles = output.primaryArticles.length > 0;
+  const hasAnySourceArticles = output.sourceArticles.length > 0;
+  const timingSensitive = isTimingSensitiveQuestion(params.userQuestion);
+  const actionSensitive = isActionSensitiveQuestion(params.userQuestion);
+
+  const needsDirectSupport =
+    timingSensitive || actionSensitive || params.useJordanLegalSources;
+
+  const hasWeakSupport =
+    output.sourceConfidence === 'low' ||
+    !hasPrimaryArticles ||
+    (needsDirectSupport && !hasAnySourceArticles);
+
+  if (!hasWeakSupport) {
+    return output;
+  }
+
+  const warning = timingSensitive
+    ? 'تنبيه مهم: لا يمكن الجزم بالمدد أو سقوط الحق أو صحة الإجراء من دون التحقق من تاريخ الحكم، وتاريخ التبليغ، ونوع الحكم، والنص القانوني المنطبق؛ لذلك يجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء.'
+    : 'تنبيه مهم: هذه إجابة معلوماتية مبنية على النصوص المتاحة، ولا يجوز الاعتماد عليها كقرار قانوني نهائي قبل مراجعة محامٍ مختص.';
+
+  const saferSourceConfidence: SourceConfidence = hasAnySourceArticles
+    ? 'medium'
+    : 'low';
+
+  const saferSourceNote = hasAnySourceArticles
+    ? 'تم العثور على نصوص قانونية ذات صلة، لكنها لا تكفي وحدها للجزم النهائي دون مراجعة محامٍ مختص وتطبيقها على الوقائع بدقة.'
+    : 'لم يتم العثور على سند قانوني مباشر كافٍ من النصوص المتاحة، ويجب مراجعة محامٍ مختص قبل اتخاذ أي إجراء.';
+
+  return {
+    ...output,
+    answer: prependSafetyWarning(output.answer, warning),
+    lawyerSummary: buildSaferLawyerSummary(output.lawyerSummary, warning),
+    sourceNote: shortenSourceNote(saferSourceNote),
+    sourceConfidence: saferSourceConfidence,
+    primaryArticles: hasPrimaryArticles ? output.primaryArticles : [],
+    sourceArticles: uniqueStrings([
+      ...output.primaryArticles,
+      ...output.relatedArticles,
+      ...output.sourceArticles,
+    ]),
+  };
+}
+
 function normalizeLegalOutput(
   parsed: Partial<LegalAiOutput>,
   fallbackAnswer: string,
@@ -1067,7 +1213,17 @@ export async function POST(req: NextRequest) {
     });
 
     const outputText = extractOutputText(response);
-    const legalOutput = parseLegalOutput(outputText, useJordanLegalSources, question);
+    const parsedLegalOutput = parseLegalOutput(
+      outputText,
+      useJordanLegalSources,
+      question
+    );
+
+    const legalOutput = applyLegalAnswerSafetyCheck(parsedLegalOutput, {
+      userQuestion: question,
+      useJordanLegalSources,
+      hasDatabaseLegalContext,
+    });
 
     return NextResponse.json(legalOutput);
   } catch (error) {
