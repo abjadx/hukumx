@@ -36,6 +36,23 @@ function cleanArticleTextForDisplay(value: string): string {
     .trim();
 }
 
+function getBestArticleText(article: {
+  articleText: string;
+  articleTextClean: string | null;
+  articleTextReviewed: string | null;
+  reviewStatus: string;
+}) {
+  if (
+    article.reviewStatus === 'approved' &&
+    article.articleTextReviewed &&
+    article.articleTextReviewed.trim()
+  ) {
+    return article.articleTextReviewed;
+  }
+
+  return article.articleTextClean || article.articleText;
+}
+
 async function findLegalArticle(params: {
   articleNumber: string;
   country?: string;
@@ -54,7 +71,12 @@ async function findLegalArticle(params: {
           ? {
               OR: [
                 { nameAr: { contains: params.country || '' } },
-                { nameEn: { contains: params.country || '', mode: 'insensitive' } },
+                {
+                  nameEn: {
+                    contains: params.country || '',
+                    mode: 'insensitive',
+                  },
+                },
                 { code: { equals: 'JO' } },
               ],
             }
@@ -135,13 +157,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const bestArticleText = getBestArticleText(article);
+
     return NextResponse.json({
       articleNumber: article.articleNumber,
       sourceTitle: article.legalSource.titleAr,
       country: article.legalSource.country.nameAr,
-      articleText: cleanArticleTextForDisplay(
-        article.articleTextClean || article.articleText
-      ),
+      reviewStatus: article.reviewStatus,
+      isReviewed: article.reviewStatus === 'approved',
+      articleText: cleanArticleTextForDisplay(bestArticleText),
     });
   } catch (error) {
     console.error('Legal article database lookup error:', error);
