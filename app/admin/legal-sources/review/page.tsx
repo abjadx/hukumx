@@ -570,6 +570,26 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
             هذه الصفحة مخصصة لاعتماد النص القانوني بعد مراجعته. النص المعتمد هو
             الذي سنجعله لاحقًا يظهر للمستخدم بدل النص المستخرج تلقائيًا.
           </p>
+
+          <a
+            href={`/admin/legal-sources?key=${encodeURIComponent(adminKey)}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid rgba(148, 163, 184, 0.35)',
+              background: '#1e293b',
+              color: '#f8fafc',
+              borderRadius: '16px',
+              padding: '14px 22px',
+              fontWeight: 900,
+              fontSize: '14px',
+              textDecoration: 'none',
+              marginTop: '18px',
+            }}
+          >
+            العودة إلى الشاشة الرئيسية
+          </a>
         </section>
 
         {saved === '1' && (
