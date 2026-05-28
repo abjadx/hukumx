@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 type SelectedCountry = {
@@ -156,9 +156,51 @@ export default function AnswerBox({
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleError, setArticleError] = useState('');
 
-  const cleanedPrimaryArticles = uniqueArticles(primaryArticles);
-  const cleanedRelatedArticles = uniqueArticles(relatedArticles);
-  const cleanedSourceArticles = uniqueArticles(sourceArticles);
+  const cleanedPrimaryArticles = useMemo(
+    () => uniqueArticles(primaryArticles),
+    [primaryArticles]
+  );
+  const cleanedRelatedArticles = useMemo(
+    () => uniqueArticles(relatedArticles),
+    [relatedArticles]
+  );
+  const cleanedSourceArticles = useMemo(
+    () => uniqueArticles(sourceArticles),
+    [sourceArticles]
+  );
+
+  const answerSourceKey = useMemo(
+    () =>
+      [
+        answer,
+        lawyerSummary,
+        sourceNote || '',
+        sourceConfidence || '',
+        sourceTitle || '',
+        cleanedPrimaryArticles.join(','),
+        cleanedRelatedArticles.join(','),
+        cleanedSourceArticles.join(','),
+      ].join('|'),
+    [
+      answer,
+      lawyerSummary,
+      sourceNote,
+      sourceConfidence,
+      sourceTitle,
+      cleanedPrimaryArticles,
+      cleanedRelatedArticles,
+      cleanedSourceArticles,
+    ]
+  );
+
+  const currentAnswerKeyRef = useRef(answerSourceKey);
+
+  useEffect(() => {
+    currentAnswerKeyRef.current = answerSourceKey;
+    setSelectedArticle(null);
+    setArticleError('');
+    setArticleLoading(false);
+  }, [answerSourceKey]);
 
   const hasSourceData =
     Boolean(sourceNote) ||
@@ -189,6 +231,14 @@ export default function AnswerBox({
   };
 
   const openArticleText = async (articleNumber: string) => {
+    if (selectedArticle?.articleNumber === articleNumber && !articleLoading) {
+      setSelectedArticle(null);
+      setArticleError('');
+      return;
+    }
+
+    const requestKey = currentAnswerKeyRef.current;
+
     try {
       setArticleLoading(true);
       setArticleError('');
@@ -205,6 +255,10 @@ export default function AnswerBox({
       });
 
       const text = await res.text();
+
+      if (currentAnswerKeyRef.current !== requestKey) {
+        return;
+      }
 
       let data: {
         error?: string;
@@ -230,6 +284,10 @@ export default function AnswerBox({
         return;
       }
 
+      if (currentAnswerKeyRef.current !== requestKey) {
+        return;
+      }
+
       setSelectedArticle({
         articleNumber: data.articleNumber || articleNumber,
         sourceTitle:
@@ -239,9 +297,13 @@ export default function AnswerBox({
         articleText: normalizeLegalReferencesForDisplay(data.articleText || ''),
       });
     } catch {
-      setArticleError('تعذر الاتصال بالخادم لجلب نص المادة.');
+      if (currentAnswerKeyRef.current === requestKey) {
+        setArticleError('تعذر الاتصال بالخادم لجلب نص المادة.');
+      }
     } finally {
-      setArticleLoading(false);
+      if (currentAnswerKeyRef.current === requestKey) {
+        setArticleLoading(false);
+      }
     }
   };
 
@@ -266,9 +328,11 @@ export default function AnswerBox({
             type="button"
             onClick={() => openArticleText(article)}
             className={buttonClass}
-            title={`عرض نص المادة ${article}`}
+            title={`عرض أو إخفاء نص المادة ${article}`}
           >
-            {article}
+            {selectedArticle?.articleNumber === article
+              ? `إخفاء المادة ${article}`
+              : `عرض المادة ${article}`}
           </button>
         ))}
       </div>
@@ -449,7 +513,7 @@ export default function AnswerBox({
             <div className="flex items-center gap-2">
               <span className="text-amber-400">📚</span>
               <h4 className="text-amber-300 font-bold text-sm">
-                قوة المصدر القانوني
+                المصدر القانوني المعتمد
               </h4>
             </div>
 
@@ -462,6 +526,18 @@ export default function AnswerBox({
                 درجة الثقة: {getSourceConfidenceLabel(sourceConfidence)}
               </span>
             )}
+          </div>
+
+          <div className="mb-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-slate-600 bg-slate-900/40 p-3 text-sm leading-7 text-slate-300">
+              <span className="font-bold text-amber-300">تنبيه قانوني: </span>
+              هذه الإجابة للاستدلال الأولي ولا تغني عن مراجعة محامٍ مختص لتطبيق النص على وقائع الحالة.
+            </div>
+
+            <div className="rounded-xl border border-slate-600 bg-slate-900/40 p-3 text-sm leading-7 text-slate-300">
+              <span className="font-bold text-amber-300">ملاحظة تقنية: </span>
+              عند إجراء بحث جديد يتم إغلاق أي مادة مفتوحة من البحث السابق تلقائيًا حتى لا تختلط المصادر.
+            </div>
           </div>
 
           {(sourceTitle ||
@@ -553,9 +629,10 @@ export default function AnswerBox({
           )}
 
           {sourceNote && (
-            <p className="mt-4 text-slate-300 text-sm leading-7">
+            <div className="mt-4 rounded-xl border border-slate-600 bg-slate-900/40 p-3 text-sm leading-7 text-slate-300">
+              <span className="font-bold text-amber-300">ملاحظة المصدر: </span>
               {sourceNote}
-            </p>
+            </div>
           )}
         </div>
       )}
