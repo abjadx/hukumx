@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import { prisma } from '../../lib/prisma';
 
 export const runtime = 'nodejs';
@@ -8,6 +8,7 @@ type PageProps = {
   searchParams?: Promise<{
     key?: string | string[];
     q?: string | string[];
+    page?: string | string[];
   }>;
 };
 
@@ -29,6 +30,8 @@ type AdminArticle = {
   articleNumber: string;
   articleText: string;
   articleTextClean: string | null;
+  articleTextReviewed: string | null;
+  reviewStatus: string;
   legalSource: {
     titleAr: string;
     country: {
@@ -45,6 +48,92 @@ function getSingleParam(value?: string | string[]) {
 function trimText(value: string, maxLength = 220) {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength)}...`;
+}
+
+function formatArticleTextForAdmin(value: string) {
+  const normalizedText = value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+
+    // تصحيح أخطاء OCR شائعة في العربية
+    .replace(/إال/g, 'إلا')
+    .replace(/اإل/g, 'الإ')
+    .replace(/األ/g, 'الأ')
+    .replace(/اآل/g, 'الا')
+    .replace(/اال/g, 'الا')
+    .replace(/اآ/g, 'الا')
+    .replace(/استالم/g, 'استلام')
+    .replace(/بالاستالم/g, 'بالاستلام')
+    .replace(/(^|[\s\n،؛.:()[\]{}-])كال(?=\s|[،؛.:])/g, '$1كلا')
+
+    // تصحيح "لا" إذا ظهرت مقلوبة ككلمة مستقلة
+    .replace(/(^|[\s\n،؛.:()[\]{}-])ال(?=\s)/g, '$1لا')
+
+    // تصحيح "ولا" إذا ظهرت مقلوبة ككلمة مستقلة
+    .replace(/(^|[\s\n،؛.:()[\]{}-])وال(?=\s)/g, '$1ولا')
+    .trim();
+
+  const lines = normalizedText
+  .split('\n')
+  .map((line) =>
+    line
+      .trim()
+
+      // تحويل -1 أو 1- إلى 1. لتجنب ظهور الشرطة قبل الرقم في RTL
+      .replace(/^\s*[-–]\s*(\d+)\s*[-–.]?\s*/, '$1. ')
+      .replace(/^\s*(\d+)\s*[-–]\s*/, '$1. ')
+
+      // ترتيب الفقرات الحرفية فقط إذا كانت مكتوبة صراحة مثل: أ) أو (أ)
+      .replace(
+        /^\s*\(?\s*([أابجدهوزحطيكلمنسعفصقرشتثخذضظغ])\s*\)\s*/,
+        '($1) '
+      )
+  )
+  .filter(Boolean);
+
+  const paragraphs: string[] = [];
+  let currentParagraph = '';
+
+  for (const line of lines) {
+    const isListItem =
+      /^[-–•]/.test(line) ||
+      /^\d+\s*[\.\-)]/.test(line) ||
+      /^\([أابجدهوزحطيكلمنسعفصقرشتثخذضظغ]\)/.test(line);
+
+    if (isListItem) {
+      if (currentParagraph) {
+        paragraphs.push(currentParagraph);
+      }
+
+      currentParagraph = line;
+      continue;
+    }
+
+    currentParagraph = currentParagraph
+      ? `${currentParagraph} ${line}`
+      : line;
+  }
+
+  if (currentParagraph) {
+    paragraphs.push(currentParagraph);
+  }
+
+  return paragraphs.join('\n');
+}
+
+function getBestAdminArticleText(article: AdminArticle) {
+  if (
+    article.reviewStatus === 'approved' &&
+    article.articleTextReviewed &&
+    article.articleTextReviewed.trim()
+  ) {
+    return article.articleTextReviewed;
+  }
+
+  return article.articleTextClean || article.articleText;
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -242,6 +331,10 @@ export default async function LegalSourcesAdminPage({
   const adminKey = getSingleParam(params?.key);
   const query = getSingleParam(params?.q).trim();
 
+  const pageParam = Number(getSingleParam(params?.page) || '1');
+  const currentPage = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+  const pageSize = 25;
+
   const expectedAdminKey = process.env.ADMIN_ACCESS_KEY;
 
   if (!expectedAdminKey) {
@@ -291,45 +384,68 @@ export default async function LegalSourcesAdminPage({
     );
   }
 
-  const [countriesCount, sourcesCount, articlesCount, sources, articles] =
-    await Promise.all([
-      prisma.country.count(),
-      prisma.legalSource.count(),
-      prisma.legalArticle.count(),
-      prisma.legalSource.findMany({
-        orderBy: { createdAt: 'desc' },
-        include: {
-          country: true,
-          _count: {
-            select: {
-              articles: true,
-            },
+  const [
+    countriesCount,
+    sourcesCount,
+    articlesCount,
+    sourcesRaw,
+    allArticlesRaw,
+  ] = await Promise.all([
+    prisma.country.count(),
+    prisma.legalSource.count(),
+    prisma.legalArticle.count(),
+    prisma.legalSource.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        country: true,
+        _count: {
+          select: {
+            articles: true,
           },
         },
-      }),
-      prisma.legalArticle.findMany({
-        where: query
-          ? {
-              OR: [
-                { articleNumber: { contains: query } },
-                { articleText: { contains: query, mode: 'insensitive' } },
-                { articleTextClean: { contains: query, mode: 'insensitive' } },
-              ],
-            }
-          : undefined,
-        take: query ? 50 : 25,
-        orderBy: {
-          articleNumber: 'asc',
-        },
-        include: {
-          legalSource: {
-            include: {
-              country: true,
-            },
+      },
+    }),
+    prisma.legalArticle.findMany({
+      where: query
+        ? {
+            OR: [
+              { articleNumber: { contains: query } },
+              { articleText: { contains: query, mode: 'insensitive' } },
+              { articleTextClean: { contains: query, mode: 'insensitive' } },
+            ],
+          }
+        : undefined,
+      include: {
+        legalSource: {
+          include: {
+            country: true,
           },
         },
-      }),
-    ]);
+      },
+    }),
+  ]);
+
+  const sources = sourcesRaw as AdminSource[];
+  const allArticles = allArticlesRaw as AdminArticle[];
+
+  const sortedArticles = [...allArticles].sort(
+    (a: AdminArticle, b: AdminArticle) => {
+      const numberA = Number(a.articleNumber);
+      const numberB = Number(b.articleNumber);
+
+      if (Number.isFinite(numberA) && Number.isFinite(numberB)) {
+        return numberA - numberB;
+      }
+
+      return a.articleNumber.localeCompare(b.articleNumber, 'ar');
+    }
+  );
+
+  const filteredArticlesCount = sortedArticles.length;
+  const totalPages = Math.max(1, Math.ceil(filteredArticlesCount / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const articles = sortedArticles.slice(startIndex, startIndex + pageSize);
 
   return (
     <main style={styles.page}>
@@ -403,6 +519,7 @@ export default async function LegalSourcesAdminPage({
 
           <form method="GET" style={styles.formRow}>
             <input name="key" type="hidden" value={adminKey} />
+            <input name="page" type="hidden" value="1" />
 
             <input
               name="q"
@@ -417,56 +534,75 @@ export default async function LegalSourcesAdminPage({
           </form>
 
           <div>
-            {articles.map((article: AdminArticle) => (
-              <article key={article.id} style={styles.articleCard}>
-                <div style={styles.articleHeader}>
-                  <span style={styles.articleNumber}>
-                    المادة {article.articleNumber}
-                  </span>
+            {articles.map((article: AdminArticle) => {
+              const fullArticleText = formatArticleTextForAdmin(
+                getBestAdminArticleText(article)
+              );
 
-                  <span style={styles.articleSource}>
-                    {article.legalSource.country.nameAr} —{' '}
-                    {article.legalSource.titleAr}
-                  </span>
-                </div>
+              return (
+                <article key={article.id} style={styles.articleCard}>
+                  <div style={styles.articleHeader}>
+                    <span style={styles.articleNumber}>
+                      المادة {article.articleNumber}
+                    </span>
 
-                <p style={styles.articleText}>
-                  {trimText(article.articleTextClean || article.articleText)}
-                </p>
+                    <span style={styles.articleSource}>
+                      {article.legalSource.country.nameAr} —{' '}
+                      {article.legalSource.titleAr}
+                    </span>
+                    {article.reviewStatus === 'approved' && (
+                      <span
+                        style={{
+                          border: '1px solid rgba(34, 197, 94, 0.45)',
+                          background: 'rgba(34, 197, 94, 0.12)',
+                          color: '#86efac',
+                          borderRadius: '999px',
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          fontWeight: 900,
+                        }}
+                      >
+                        نص معتمد
+                      </span>
+                    )}
+                  </div>
 
-                <details
-                  style={{
-                    marginTop: '14px',
-                    borderTop: '1px solid rgba(148, 163, 184, 0.16)',
-                    paddingTop: '14px',
-                  }}
-                >
-                  <summary
+                  <p style={styles.articleText}>{trimText(fullArticleText)}</p>
+
+                  <details
                     style={{
-                    cursor: 'pointer',
-                    color: '#fbbf24',
-                    fontWeight: 900,
-                    fontSize: '14px',
-                    marginBottom: '12px',
-                  }}
-                >
-                  عرض المادة كاملة      
-                </summary>
+                      marginTop: '14px',
+                      borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+                      paddingTop: '14px',
+                    }}
+                  >
+                    <summary
+                      style={{
+                        cursor: 'pointer',
+                        color: '#fbbf24',
+                        fontWeight: 900,
+                        fontSize: '14px',
+                        marginBottom: '12px',
+                      }}
+                    >
+                      عرض المادة كاملة
+                    </summary>
 
-                <p
-                  style={{
-                    color: '#f8fafc',
-                    fontSize: '15px',
-                    lineHeight: 2.1,
-                    whiteSpace: 'pre-wrap',
-                    margin: '12px 0 0 0',
-                  }}
-                >
-                  {article.articleTextClean || article.articleText}
-                </p>
-              </details>
-              </article>
-            ))}
+                    <p
+                      style={{
+                        color: '#f8fafc',
+                        fontSize: '15px',
+                        lineHeight: 2.1,
+                        whiteSpace: 'pre-line',
+                        margin: '12px 0 0 0',
+                      }}
+                    >
+                      {fullArticleText}
+                    </p>
+                  </details>
+                </article>
+              );
+            })}
 
             {articles.length === 0 && (
               <div
@@ -479,6 +615,61 @@ export default async function LegalSourcesAdminPage({
                 لا توجد نتائج مطابقة.
               </div>
             )}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              marginTop: '22px',
+              borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+              paddingTop: '18px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ color: '#94a3b8', fontSize: '14px' }}>
+              عرض {articles.length} من أصل {filteredArticlesCount} مادة — الصفحة{' '}
+              {safeCurrentPage} من {totalPages}
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              {safeCurrentPage > 1 && (
+                <a
+                  href={`/admin/legal-sources?key=${encodeURIComponent(
+                    adminKey
+                  )}&q=${encodeURIComponent(query)}&page=${
+                    safeCurrentPage - 1
+                  }`}
+                  style={{
+                    ...styles.button,
+                    textDecoration: 'none',
+                    background: '#1e293b',
+                    color: '#f8fafc',
+                    border: '1px solid rgba(148, 163, 184, 0.35)',
+                  }}
+                >
+                  السابق
+                </a>
+              )}
+
+              {safeCurrentPage < totalPages && (
+                <a
+                  href={`/admin/legal-sources?key=${encodeURIComponent(
+                    adminKey
+                  )}&q=${encodeURIComponent(query)}&page=${
+                    safeCurrentPage + 1
+                  }`}
+                  style={{
+                    ...styles.button,
+                    textDecoration: 'none',
+                  }}
+                >
+                  التالي
+                </a>
+              )}
+            </div>
           </div>
         </section>
       </div>
