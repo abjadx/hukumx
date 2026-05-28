@@ -285,6 +285,27 @@ const styles: Record<string, CSSProperties> = {
     gap: '12px',
     marginBottom: '12px',
   },
+    articleActions: {
+    marginInlineStart: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexWrap: 'wrap',
+  },
+  reviewButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '1px solid rgba(96, 165, 250, 0.45)',
+    background: 'rgba(37, 99, 235, 0.18)',
+    color: '#bfdbfe',
+    borderRadius: '999px',
+    padding: '7px 14px',
+    fontSize: '12px',
+    fontWeight: 900,
+    textDecoration: 'none',
+    whiteSpace: 'nowrap',
+  },
   articleNumber: {
     border: '1px solid rgba(245, 158, 11, 0.55)',
     background: 'rgba(245, 158, 11, 0.12)',
@@ -535,74 +556,85 @@ export default async function LegalSourcesAdminPage({
 
           <div>
             {articles.map((article: AdminArticle) => {
-              const fullArticleText = formatArticleTextForAdmin(
-                getBestAdminArticleText(article)
-              );
+  const fullArticleText = formatArticleTextForAdmin(
+    getBestAdminArticleText(article)
+  );
 
-              return (
-                <article key={article.id} style={styles.articleCard}>
-                  <div style={styles.articleHeader}>
-                    <span style={styles.articleNumber}>
-                      المادة {article.articleNumber}
-                    </span>
+  const reviewHref = `/admin/legal-sources/review?key=${encodeURIComponent(
+    adminKey
+  )}&article=${encodeURIComponent(article.articleNumber)}`;
 
-                    <span style={styles.articleSource}>
-                      {article.legalSource.country.nameAr} —{' '}
-                      {article.legalSource.titleAr}
-                    </span>
-                    {article.reviewStatus === 'approved' && (
-                      <span
-                        style={{
-                          border: '1px solid rgba(34, 197, 94, 0.45)',
-                          background: 'rgba(34, 197, 94, 0.12)',
-                          color: '#86efac',
-                          borderRadius: '999px',
-                          padding: '6px 12px',
-                          fontSize: '12px',
-                          fontWeight: 900,
-                        }}
-                      >
-                        نص معتمد
-                      </span>
-                    )}
-                  </div>
+  return (
+    <article key={article.id} style={styles.articleCard}>
+      <div style={styles.articleHeader}>
+        <span style={styles.articleNumber}>
+          المادة {article.articleNumber}
+        </span>
 
-                  <p style={styles.articleText}>{trimText(fullArticleText)}</p>
+        <span style={styles.articleSource}>
+          {article.legalSource.country.nameAr} —{' '}
+          {article.legalSource.titleAr}
+        </span>
 
-                  <details
-                    style={{
-                      marginTop: '14px',
-                      borderTop: '1px solid rgba(148, 163, 184, 0.16)',
-                      paddingTop: '14px',
-                    }}
-                  >
-                    <summary
-                      style={{
-                        cursor: 'pointer',
-                        color: '#fbbf24',
-                        fontWeight: 900,
-                        fontSize: '14px',
-                        marginBottom: '12px',
-                      }}
-                    >
-                      عرض المادة كاملة
-                    </summary>
+        <div style={styles.articleActions}>
+          {article.reviewStatus === 'approved' && (
+            <span
+              style={{
+                border: '1px solid rgba(34, 197, 94, 0.45)',
+                background: 'rgba(34, 197, 94, 0.12)',
+                color: '#86efac',
+                borderRadius: '999px',
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 900,
+              }}
+            >
+              نص معتمد
+            </span>
+          )}
 
-                    <p
-                      style={{
-                        color: '#f8fafc',
-                        fontSize: '15px',
-                        lineHeight: 2.1,
-                        whiteSpace: 'pre-line',
-                        margin: '12px 0 0 0',
-                      }}
-                    >
-                      {fullArticleText}
-                    </p>
-                  </details>
-                </article>
-              );
-            })}
+          <a href={reviewHref} style={styles.reviewButton}>
+            مراجعة المادة
+          </a>
+        </div>
+      </div>
+
+      <p style={styles.articleText}>{trimText(fullArticleText)}</p>
+
+      <details
+        style={{
+          marginTop: '14px',
+          borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+          paddingTop: '14px',
+        }}
+      >
+        <summary
+          style={{
+            cursor: 'pointer',
+            color: '#fbbf24',
+            fontWeight: 900,
+            fontSize: '14px',
+            marginBottom: '12px',
+          }}
+        >
+          عرض المادة كاملة
+        </summary>
+
+        <p
+          style={{
+            color: '#f8fafc',
+            fontSize: '15px',
+            lineHeight: 2.1,
+            whiteSpace: 'pre-line',
+            margin: '12px 0 0 0',
+          }}
+        >
+          {fullArticleText}
+        </p>
+      </details>
+    </article>
+  );
+})}
 
             {articles.length === 0 && (
               <div
