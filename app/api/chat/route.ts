@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { prisma } from '../../lib/prisma';
 
 export const runtime = 'nodejs';
 
@@ -65,6 +66,21 @@ type LegalAiOutput = {
   sourceArticles: string[];
   primaryArticles: string[];
   relatedArticles: string[];
+};
+
+type DatabaseLegalArticle = {
+  articleNumber: string;
+  articleText: string;
+  articleTextClean: string | null;
+  articleTextReviewed: string | null;
+  reviewStatus: string;
+  legalSource: {
+    titleAr: string;
+    slug: string;
+    country: {
+      nameAr: string;
+    };
+  };
 };
 
 const LEGAL_AI_OUTPUT_SCHEMA: Record<string, unknown> = {
@@ -185,8 +201,9 @@ function buildSystemPrompt(params: {
   country?: string | null;
   intakeType?: IntakeType | null;
   useJordanRag: boolean;
+  hasDatabaseLegalContext: boolean;
 }) {
-  const { country, intakeType, useJordanRag } = params;
+  const { country, intakeType, useJordanRag, hasDatabaseLegalContext } = params;
 
   return `
 You are Hukumx, a professional AI legal assistant for users in the Arab world.
@@ -206,13 +223,17 @@ Current context:
 - Country: ${country || 'غير محدد'}
 - Intake type: ${intakeType || 'غير محدد'}
 - Jordan legal RAG enabled: ${useJordanRag ? 'yes' : 'no'}
+- Hukumx database legal context available: ${hasDatabaseLegalContext ? 'yes' : 'no'}
 
 Legal source rules:
+- If Hukumx database legal context is provided in the user prompt, treat it as the highest-priority legal source.
+- The Hukumx database context uses the approved human-reviewed legal text when the article is approved, otherwise it uses the best available cleaned text.
+- If retrieved file_search text and Hukumx database context conflict, prefer the Hukumx database context.
 - If retrieved legal text is available and directly supports the answer, use it.
 - If the retrieved source is not enough, clearly say that the answer is only partially supported.
 - If no legal source supports the answer, do not claim that the answer is source-based.
 - Do not invent article numbers.
-- Do not cite an article unless it appeared clearly in the retrieved legal content.
+- Do not cite an article unless it appeared clearly in the retrieved legal content or Hukumx database legal context.
 - For Jordan questions, prioritize the retrieved Jordanian legal source when available.
 
 Structured output rules:
@@ -326,9 +347,26 @@ Important:
 `;
 }
 
-function buildUserPrompt(body: ChatRequestBody) {
+function buildUserPrompt(
+  body: ChatRequestBody,
+  databaseLegalContext: string
+) {
   const question = getUserQuestion(body);
   const intakeData = getRelevantIntakeData(body);
+
+  const databaseContextBlock = databaseLegalContext.trim()
+    ? `
+Hukumx database legal context:
+${databaseLegalContext}
+
+Important database context rule:
+- Use the Hukumx database legal context above as the primary source when it directly answers the question.
+- Article texts in this context already follow the system priority: approved reviewed text first, then cleaned text, then original extracted text.
+`
+    : `
+Hukumx database legal context:
+No matching database legal context was found for this question.
+`;
 
   return `
 User legal question:
@@ -343,9 +381,310 @@ ${body.intakeType || 'غير محدد'}
 Additional intake data:
 ${JSON.stringify(intakeData || {}, null, 2)}
 
+${databaseContextBlock}
+
 Please answer according to the system instructions and return only the required JSON object.
 `;
 }
+
+
+function normalizeArabicForSearch(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[إأآا]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const LEGAL_SEARCH_STOP_WORDS = new Set([
+  'في',
+  'من',
+  'على',
+  'الى',
+  'إلى',
+  'عن',
+  'ما',
+  'ماذا',
+  'هل',
+  'اذا',
+  'إذا',
+  'او',
+  'أو',
+  'و',
+  'ثم',
+  'مع',
+  'هذا',
+  'هذه',
+  'ذلك',
+  'التي',
+  'الذي',
+  'الذين',
+  'كان',
+  'كانت',
+  'يكون',
+  'تكون',
+  'هو',
+  'هي',
+  'انا',
+  'أنا',
+  'لي',
+  'له',
+  'لها',
+  'بعد',
+  'قبل',
+  'عند',
+  'كل',
+  'اي',
+  'أي',
+  'غير',
+  'بسبب',
+  'لدي',
+  'عندي',
+]);
+
+function tokenizeLegalSearchText(value: string): string[] {
+  const normalized = normalizeArabicForSearch(value);
+
+  return uniqueStrings(
+    normalized
+      .split(/[^\u0600-\u06FF0-9]+/g)
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 3)
+      .filter((term) => !LEGAL_SEARCH_STOP_WORDS.has(term))
+  ).slice(0, 12);
+}
+
+function compareArticleNumbers(a: string, b: string) {
+  const numberA = Number(a);
+  const numberB = Number(b);
+
+  if (Number.isFinite(numberA) && Number.isFinite(numberB)) {
+    return numberA - numberB;
+  }
+
+  return a.localeCompare(b, 'ar');
+}
+
+function getBestDatabaseArticleText(article: DatabaseLegalArticle) {
+  if (
+    article.reviewStatus === 'approved' &&
+    article.articleTextReviewed &&
+    article.articleTextReviewed.trim()
+  ) {
+    return article.articleTextReviewed;
+  }
+
+  return article.articleTextClean || article.articleText;
+}
+
+function cleanDatabaseArticleTextForContext(value: string): string {
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function inferLikelyArticleNumbers(question: string): string[] {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+  const inferredArticles: string[] = [];
+
+  if (
+    includesAny(normalizedQuestion, [
+      'مده الاستئناف',
+      'ميعاد الاستئناف',
+      'موعد الاستئناف',
+      'مده الطعن بالاستئناف',
+      'الطعن بالاستئناف',
+    ])
+  ) {
+    inferredArticles.push('178');
+  }
+
+  if (
+    includesAny(normalizedQuestion, [
+      'فاتت مده الاستئناف',
+      'فوات مده الاستئناف',
+      'انقضاء مده الاستئناف',
+      'فوات الميعاد',
+      'رد الطعن شكلا',
+      'رد الطعن شكل',
+    ])
+  ) {
+    inferredArticles.push('172', '178');
+  }
+
+  if (
+    includesAny(normalizedQuestion, [
+      'اعاده المحاكمه',
+      'طلب اعاده المحاكمه',
+    ])
+  ) {
+    inferredArticles.push('213');
+  }
+
+  if (
+    includesAny(normalizedQuestion, [
+      'اعتراض الغير',
+      'اعتراض غير',
+    ])
+  ) {
+    inferredArticles.push('207', '208');
+  }
+
+  if (
+    includesAny(normalizedQuestion, [
+      'التمييز',
+      'محكمه التمييز',
+      'الطعن بالتمييز',
+    ])
+  ) {
+    inferredArticles.push('191');
+  }
+
+  return uniqueStrings(inferredArticles);
+}
+
+function scoreDatabaseArticle(params: {
+  article: DatabaseLegalArticle;
+  questionTerms: string[];
+  explicitArticleNumbers: string[];
+  inferredArticleNumbers: string[];
+}) {
+  const {
+    article,
+    questionTerms,
+    explicitArticleNumbers,
+    inferredArticleNumbers,
+  } = params;
+
+  const articleText = normalizeArabicForSearch(getBestDatabaseArticleText(article));
+  const sourceTitle = normalizeArabicForSearch(article.legalSource.titleAr);
+
+  let score = 0;
+
+  if (explicitArticleNumbers.includes(article.articleNumber)) {
+    score += 1000;
+  }
+
+  if (inferredArticleNumbers.includes(article.articleNumber)) {
+    score += 700;
+  }
+
+  for (const term of questionTerms) {
+    if (articleText.includes(term)) {
+      score += 8;
+    }
+
+    if (sourceTitle.includes(term)) {
+      score += 3;
+    }
+  }
+
+  return score;
+}
+
+async function buildDatabaseLegalContext(params: {
+  question: string;
+  country?: string | null;
+}) {
+  if (!isJordan(params.country)) {
+    return '';
+  }
+
+  const explicitArticleNumbers = extractArticleNumbers(params.question);
+  const inferredArticleNumbers = inferLikelyArticleNumbers(params.question);
+  const questionTerms = tokenizeLegalSearchText(params.question);
+
+  const dbArticles = (await prisma.legalArticle.findMany({
+    where: {
+      legalSource: {
+        isActive: true,
+        slug: 'jordan-civil-procedure-law',
+      },
+    },
+    select: {
+      articleNumber: true,
+      articleText: true,
+      articleTextClean: true,
+      articleTextReviewed: true,
+      reviewStatus: true,
+      legalSource: {
+        select: {
+          titleAr: true,
+          slug: true,
+          country: {
+            select: {
+              nameAr: true,
+            },
+          },
+        },
+      },
+    },
+  })) as DatabaseLegalArticle[];
+
+  const scoredArticles = dbArticles
+    .map((article) => ({
+      article,
+      score: scoreDatabaseArticle({
+        article,
+        questionTerms,
+        explicitArticleNumbers,
+        inferredArticleNumbers,
+      }),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+
+      return compareArticleNumbers(
+        a.article.articleNumber,
+        b.article.articleNumber
+      );
+    })
+    .slice(0, 6)
+    .map((item) => item.article);
+
+  if (!scoredArticles.length) {
+    return '';
+  }
+
+  return scoredArticles
+    .map((article) => {
+      const bestText = cleanDatabaseArticleTextForContext(
+        getBestDatabaseArticleText(article)
+      );
+
+      const truncatedText =
+        bestText.length > 3000 ? `${bestText.slice(0, 3000).trim()}...` : bestText;
+
+      return [
+        `القانون: ${article.legalSource.titleAr}`,
+        `الدولة: ${article.legalSource.country.nameAr}`,
+        `رقم المادة: ${article.articleNumber}`,
+        `حالة المراجعة: ${getReviewStatusForPrompt(article.reviewStatus)}`,
+        'نص المادة:',
+        truncatedText,
+      ].join('\n');
+    })
+    .join('\n\n---\n\n');
+}
+
+function getReviewStatusForPrompt(status: string) {
+  if (status === 'approved') return 'معتمدة بنص بشري مراجع';
+  if (status === 'needs_review') return 'نص مقترح يحتاج مراجعة بشرية';
+  if (status === 'pending') return 'غير مراجعة';
+  return status || 'غير مراجعة';
+}
+
 
 function removeDuplicateSourceSection(answer: string): string {
   return answer
@@ -674,16 +1013,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const databaseLegalContext = await buildDatabaseLegalContext({
+      question,
+      country: body.country,
+    });
+
+    const hasDatabaseLegalContext = Boolean(databaseLegalContext.trim());
+
     const useJordanRag =
       isJordan(body.country) && Boolean(JORDAN_LAWS_VECTOR_STORE_ID);
+
+    const useJordanLegalSources = useJordanRag || hasDatabaseLegalContext;
 
     const systemPrompt = buildSystemPrompt({
       country: body.country,
       intakeType: body.intakeType,
       useJordanRag,
+      hasDatabaseLegalContext,
     });
 
-    const userPrompt = buildUserPrompt(body);
+    const userPrompt = buildUserPrompt(body, databaseLegalContext);
 
     const tools = useJordanRag
       ? [
@@ -718,7 +1067,7 @@ export async function POST(req: NextRequest) {
     });
 
     const outputText = extractOutputText(response);
-    const legalOutput = parseLegalOutput(outputText, useJordanRag, question);
+    const legalOutput = parseLegalOutput(outputText, useJordanLegalSources, question);
 
     return NextResponse.json(legalOutput);
   } catch (error) {
