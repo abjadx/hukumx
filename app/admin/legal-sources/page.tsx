@@ -1,14 +1,28 @@
 import type { CSSProperties } from 'react';
+import { redirect } from 'next/navigation';
+import OpenAI from 'openai';
 import { prisma } from '../../lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const AI_BATCH_SIZE = 5;
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const OPENAI_REVIEW_MODEL =
+  process.env.OPENAI_REVIEW_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
 type PageProps = {
   searchParams?: Promise<{
     key?: string | string[];
     q?: string | string[];
     page?: string | string[];
+    status?: string | string[];
+    saved?: string | string[];
+    processed?: string | string[];
   }>;
 };
 
@@ -40,6 +54,19 @@ type AdminArticle = {
   };
 };
 
+type AiReviewArticle = {
+  articleNumber: string;
+  articleText: string;
+  articleTextClean: string | null;
+  articleTextReviewed: string | null;
+  legalSource: {
+    titleAr: string;
+    country: {
+      nameAr: string;
+    };
+  };
+};
+
 function getSingleParam(value?: string | string[]) {
   if (Array.isArray(value)) return value[0] || '';
   return value || '';
@@ -48,6 +75,48 @@ function getSingleParam(value?: string | string[]) {
 function trimText(value: string, maxLength = 220) {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength)}...`;
+}
+
+function extractOutputText(response: unknown): string {
+  if (
+    typeof response === 'object' &&
+    response !== null &&
+    'output_text' in response &&
+    typeof response.output_text === 'string'
+  ) {
+    return response.output_text;
+  }
+
+  if (
+    typeof response === 'object' &&
+    response !== null &&
+    'output' in response &&
+    Array.isArray(response.output)
+  ) {
+    for (const item of response.output) {
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        'content' in item &&
+        Array.isArray(item.content)
+      ) {
+        for (const contentItem of item.content) {
+          if (
+            typeof contentItem === 'object' &&
+            contentItem !== null &&
+            'type' in contentItem &&
+            'text' in contentItem &&
+            (contentItem.type === 'output_text' || contentItem.type === 'text') &&
+            typeof contentItem.text === 'string'
+          ) {
+            return contentItem.text;
+          }
+        }
+      }
+    }
+  }
+
+  return '';
 }
 
 function formatArticleTextForAdmin(value: string) {
@@ -77,22 +146,22 @@ function formatArticleTextForAdmin(value: string) {
     .trim();
 
   const lines = normalizedText
-  .split('\n')
-  .map((line) =>
-    line
-      .trim()
+    .split('\n')
+    .map((line) =>
+      line
+        .trim()
 
-      // تحويل -1 أو 1- إلى 1. لتجنب ظهور الشرطة قبل الرقم في RTL
-      .replace(/^\s*[-–]\s*(\d+)\s*[-–.]?\s*/, '$1. ')
-      .replace(/^\s*(\d+)\s*[-–]\s*/, '$1. ')
+        // تحويل -1 أو 1- إلى 1. لتجنب ظهور الشرطة قبل الرقم في RTL
+        .replace(/^\s*[-–]\s*(\d+)\s*[-–.]?\s*/, '$1. ')
+        .replace(/^\s*(\d+)\s*[-–]\s*/, '$1. ')
 
-      // ترتيب الفقرات الحرفية فقط إذا كانت مكتوبة صراحة مثل: أ) أو (أ)
-      .replace(
-        /^\s*\(?\s*([أابجدهوزحطيكلمنسعفصقرشتثخذضظغ])\s*\)\s*/,
-        '($1) '
-      )
-  )
-  .filter(Boolean);
+        // ترتيب الفقرات الحرفية فقط إذا كانت مكتوبة صراحة مثل: أ) أو (أ)
+        .replace(
+          /^\s*\(?\s*([أابجدهوزحطيكلمنسعفصقرشتثخذضظغ])\s*\)\s*/,
+          '($1) '
+        )
+    )
+    .filter(Boolean);
 
   const paragraphs: string[] = [];
   let currentParagraph = '';
@@ -133,7 +202,283 @@ function getBestAdminArticleText(article: AdminArticle) {
     return article.articleTextReviewed;
   }
 
-  return article.articleTextClean || article.articleText;
+  return article.articleTextReviewed || article.articleTextClean || article.articleText;
+}
+
+function getReviewStatusLabel(status: string) {
+  if (status === 'approved') return 'معتمدة';
+  if (status === 'needs_review') return 'تحتاج مراجعة';
+  if (status === 'pending') return 'غير مراجعة';
+  return status || 'غير مراجعة';
+}
+
+function getSafeStatusFilter(value: string) {
+  if (value === 'approved') return 'approved';
+  if (value === 'needs_review') return 'needs_review';
+  if (value === 'pending') return 'pending';
+  return 'all';
+}
+
+async function generateAiReviewedArticle(article: AiReviewArticle) {
+  const sourceText =
+    article.articleTextReviewed ||
+    article.articleTextClean ||
+    article.articleText;
+
+  const response = await openai.responses.create({
+    model: OPENAI_REVIEW_MODEL,
+    temperature: 0,
+    input: [
+      {
+        role: 'system',
+        content: `
+أنت محرر ومدقق قانوني عربي متخصص في تصحيح النصوص القانونية المستخرجة من PDF/OCR.
+
+هذه ليست مهمة تدقيق إملائي عادي. مهمتك أن تكتشف أخطاء OCR حتى لو كانت الكلمة الناتجة كلمة عربية لكنها غير منطقية في السياق القانوني.
+
+مهمتك الأساسية:
+1. قراءة النص كأنه مادة قانونية رسمية.
+2. اكتشاف الكلمات غير المنطقية أو الركيكة أو التي تبدو ناتجة عن OCR.
+3. تصحيح الكلمات اعتمادًا على السياق القانوني واللغوي.
+4. دمج الأسطر المقطوعة داخل الجملة الواحدة.
+5. الحفاظ على أرقام البنود والفقرات.
+6. عدم حذف أي حكم قانوني.
+7. عدم إضافة أي حكم قانوني.
+8. عدم شرح المادة.
+9. عدم تلخيص النص.
+10. عدم إعادة صياغة النص بأسلوب جديد إلا إذا كان ذلك ضروريًا لإصلاح خطأ OCR واضح.
+
+أمثلة يجب فهمها كسياق لا كقائمة حصرية:
+- إال ← إلا
+- االلكترونية ← الإلكترونية أو الالكترونية حسب نمط النص
+- االإلكترونية ← الإلكترونية
+- اآلتية ← الآتية أو الاتية
+- بالاستالم ← بالاستلام
+- استالم ← استلام
+- كال العنوانين ← كلا العنوانين
+- مذيال ← مذيلاً
+- محيال ← محيلاً
+- مذيال باسمه ← مذيلاً باسمه
+- إخالله ← إخلاله
+- إلجراء ← لإجراء
+- لألصول ← للأصول
+- تبليغة ← تبليغه إذا كان السياق عن التبليغ
+- إذا ظهرت كلمة بلا معنى أو غريبة في سياق القانون، فاستنتج أقرب كلمة قانونية صحيحة من السياق.
+
+قواعد مهمة:
+- إذا كانت الكلمة بلا معنى أو غير مناسبة للسياق القانوني، صححها لأقرب كلمة قانونية صحيحة.
+- إذا كان التصحيح واضحًا من السياق، صححه.
+- إذا كان التصحيح محتملًا وليس مؤكدًا، ضعه كما هو في correctedText، وأدرجه في uncertainTerms.
+- لا تضع Markdown.
+- لا تكتب شرحًا خارج JSON.
+- يجب أن يكون correctedText نصًا قانونيًا عربيًا مقروءًا ومنظمًا.
+- حافظ على النص كاملًا قدر الإمكان.
+
+أعد JSON فقط بهذا الشكل:
+{
+  "correctedText": "النص المصحح كاملًا",
+  "detectedIssues": ["وصف مختصر للأخطاء التي تم تصحيحها"],
+  "uncertainTerms": ["كلمات بقيت غير مؤكدة وتحتاج مراجعة بشرية"]
+}
+        `.trim(),
+      },
+      {
+        role: 'user',
+        content: `
+القانون: ${article.legalSource.titleAr}
+الدولة: ${article.legalSource.country.nameAr}
+رقم المادة: ${article.articleNumber}
+
+النص التالي مادة قانونية مستخرجة من PDF/OCR، وفيها أخطاء كثيرة قد تكون:
+- انقلاب حروف
+- كلمات بلا معنى
+- كلمات صحيحة ظاهريًا لكنها خطأ في السياق
+- فواصل أسطر خاطئة
+- أخطاء في لا / ال / إلا / الإلكترونية / الاستلام
+- أخطاء في الترقيم والبنود
+
+صحح النص بأفضل دقة ممكنة، واجعل correctedText أقرب ما يمكن إلى نص قانوني رسمي قابل للمراجعة البشرية.
+
+النص:
+
+${sourceText}
+        `.trim(),
+      },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'legal_article_review',
+        strict: true,
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            correctedText: {
+              type: 'string',
+            },
+            detectedIssues: {
+              type: 'array',
+              items: {
+                type: 'string',
+              },
+            },
+            uncertainTerms: {
+              type: 'array',
+              items: {
+                type: 'string',
+              },
+            },
+          },
+          required: ['correctedText', 'detectedIssues', 'uncertainTerms'],
+        },
+      },
+    },
+  });
+
+  const outputText = extractOutputText(response).trim();
+
+  let suggestedText = '';
+  let reviewNotes = '';
+
+  try {
+    const parsed = JSON.parse(outputText) as {
+      correctedText?: string;
+      detectedIssues?: unknown[];
+      uncertainTerms?: unknown[];
+    };
+
+    suggestedText = String(parsed.correctedText || '').trim();
+
+    const detectedIssues = Array.isArray(parsed.detectedIssues)
+      ? parsed.detectedIssues.filter(
+          (item): item is string => typeof item === 'string'
+        )
+      : [];
+
+    const uncertainTerms = Array.isArray(parsed.uncertainTerms)
+      ? parsed.uncertainTerms.filter(
+          (item): item is string => typeof item === 'string'
+        )
+      : [];
+
+    reviewNotes = [
+      'تم توليد نسخة مقترحة بالذكاء الصناعي ضمن معالجة دفعات القانون. تحتاج مراجعة واعتماد بشري قبل استخدامها كنص نهائي.',
+      detectedIssues.length
+        ? `الأخطاء المكتشفة: ${detectedIssues.join(' | ')}`
+        : '',
+      uncertainTerms.length
+        ? `كلمات تحتاج مراجعة: ${uncertainTerms.join(' | ')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  } catch {
+    suggestedText = outputText;
+    reviewNotes =
+      'تم توليد نسخة مقترحة بالذكاء الصناعي ضمن معالجة دفعات القانون، لكن لم يتمكن النظام من قراءة تقرير التصحيح بصيغة منظمة.';
+  }
+
+  if (!suggestedText) {
+    throw new Error('AI did not return suggested text');
+  }
+
+  return {
+    suggestedText,
+    reviewNotes,
+  };
+}
+
+async function suggestAiReviewedArticlesBatch(formData: FormData) {
+  'use server';
+
+  const adminKey = String(formData.get('key') || '');
+  const expectedAdminKey = process.env.ADMIN_ACCESS_KEY;
+
+  if (!expectedAdminKey || adminKey !== expectedAdminKey) {
+    throw new Error('Unauthorized admin action');
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured');
+  }
+
+  const pendingArticles = await prisma.legalArticle.findMany({
+    where: {
+      reviewStatus: 'pending',
+      legalSource: {
+        isActive: true,
+      },
+    },
+    include: {
+      legalSource: {
+        include: {
+          country: true,
+        },
+      },
+    },
+  });
+
+  const sortedArticles = [...pendingArticles].sort((a, b) => {
+    const numberA = Number(a.articleNumber);
+    const numberB = Number(b.articleNumber);
+
+    if (Number.isFinite(numberA) && Number.isFinite(numberB)) {
+      return numberA - numberB;
+    }
+
+    return a.articleNumber.localeCompare(b.articleNumber, 'ar');
+  });
+
+  const batchArticles = sortedArticles.slice(0, AI_BATCH_SIZE);
+  let processedCount = 0;
+
+  for (const article of batchArticles) {
+    try {
+      const { suggestedText, reviewNotes } = await generateAiReviewedArticle(article);
+
+      await prisma.legalArticle.update({
+        where: {
+          id: article.id,
+        },
+        data: {
+          articleTextReviewed: suggestedText,
+          reviewStatus: 'needs_review',
+          reviewNotes,
+          reviewedAt: null,
+          reviewedBy: null,
+        },
+      });
+
+      processedCount += 1;
+    } catch (error) {
+      await prisma.legalArticle.update({
+        where: {
+          id: article.id,
+        },
+        data: {
+          articleTextReviewed:
+            article.articleTextReviewed ||
+            article.articleTextClean ||
+            article.articleText,
+          reviewStatus: 'needs_review',
+          reviewNotes: `فشل توليد النص المقترح بالذكاء الصناعي لهذه المادة، وتم تحويلها للمراجعة البشرية اليدوية: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`,
+          reviewedAt: null,
+          reviewedBy: null,
+        },
+      });
+    }
+  }
+
+  redirect(
+    `/admin/legal-sources?key=${encodeURIComponent(
+      adminKey
+    )}&status=needs_review&saved=${
+      batchArticles.length === 0 ? 'ai-empty' : 'ai-batch'
+    }&processed=${processedCount}`
+  );
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -207,11 +552,19 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: '24px',
     boxShadow: '0 18px 50px rgba(0,0,0,0.24)',
   },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '16px',
+    flexWrap: 'wrap',
+    marginBottom: '18px',
+  },
   sectionTitle: {
     color: '#fbbf24',
     fontSize: '22px',
     fontWeight: 900,
-    margin: '0 0 20px 0',
+    margin: 0,
   },
   tableWrap: {
     overflowX: 'auto',
@@ -250,9 +603,20 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     gap: '10px',
     marginBottom: '20px',
+    flexWrap: 'wrap',
   },
   input: {
     flex: 1,
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+    background: 'rgba(2, 6, 23, 0.72)',
+    color: '#f8fafc',
+    borderRadius: '16px',
+    padding: '14px 16px',
+    outline: 'none',
+    fontSize: '14px',
+  },
+  select: {
+    flex: '0 0 220px',
     border: '1px solid rgba(148, 163, 184, 0.35)',
     background: 'rgba(2, 6, 23, 0.72)',
     color: '#f8fafc',
@@ -271,6 +635,16 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     fontSize: '14px',
   },
+  aiButton: {
+    border: '1px solid rgba(96, 165, 250, 0.45)',
+    background: 'rgba(37, 99, 235, 0.24)',
+    color: '#bfdbfe',
+    borderRadius: '16px',
+    padding: '13px 18px',
+    fontWeight: 900,
+    cursor: 'pointer',
+    fontSize: '14px',
+  },
   articleCard: {
     border: '1px solid rgba(148, 163, 184, 0.18)',
     background: 'rgba(2, 6, 23, 0.56)',
@@ -285,7 +659,7 @@ const styles: Record<string, CSSProperties> = {
     gap: '12px',
     marginBottom: '12px',
   },
-    articleActions: {
+  articleActions: {
     marginInlineStart: 'auto',
     display: 'flex',
     alignItems: 'center',
@@ -325,6 +699,35 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 2,
     margin: 0,
   },
+  reviewStatusBadge: {
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+    background: 'rgba(15, 23, 42, 0.75)',
+    color: '#cbd5e1',
+    borderRadius: '999px',
+    padding: '6px 12px',
+    fontSize: '12px',
+    fontWeight: 900,
+  },
+  successBox: {
+    border: '1px solid rgba(34, 197, 94, 0.45)',
+    background: 'rgba(34, 197, 94, 0.12)',
+    color: '#bbf7d0',
+    borderRadius: '18px',
+    padding: '16px 18px',
+    marginBottom: '18px',
+    fontWeight: 800,
+    lineHeight: 1.9,
+  },
+  warningBox: {
+    border: '1px solid rgba(251, 191, 36, 0.45)',
+    background: 'rgba(120, 53, 15, 0.22)',
+    color: '#fde68a',
+    borderRadius: '18px',
+    padding: '16px 18px',
+    marginBottom: '18px',
+    fontWeight: 800,
+    lineHeight: 1.9,
+  },
   loginBox: {
     maxWidth: '520px',
     margin: '70px auto',
@@ -351,6 +754,9 @@ export default async function LegalSourcesAdminPage({
   const params = await searchParams;
   const adminKey = getSingleParam(params?.key);
   const query = getSingleParam(params?.q).trim();
+  const statusFilter = getSafeStatusFilter(getSingleParam(params?.status).trim());
+  const saved = getSingleParam(params?.saved);
+  const processed = getSingleParam(params?.processed);
 
   const pageParam = Number(getSingleParam(params?.page) || '1');
   const currentPage = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
@@ -409,12 +815,30 @@ export default async function LegalSourcesAdminPage({
     countriesCount,
     sourcesCount,
     articlesCount,
+    approvedArticlesCount,
+    needsReviewArticlesCount,
+    pendingArticlesCount,
     sourcesRaw,
     allArticlesRaw,
   ] = await Promise.all([
     prisma.country.count(),
     prisma.legalSource.count(),
     prisma.legalArticle.count(),
+    prisma.legalArticle.count({
+      where: {
+        reviewStatus: 'approved',
+      },
+    }),
+    prisma.legalArticle.count({
+      where: {
+        reviewStatus: 'needs_review',
+      },
+    }),
+    prisma.legalArticle.count({
+      where: {
+        reviewStatus: 'pending',
+      },
+    }),
     prisma.legalSource.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
@@ -427,15 +851,38 @@ export default async function LegalSourcesAdminPage({
       },
     }),
     prisma.legalArticle.findMany({
-      where: query
-        ? {
-            OR: [
-              { articleNumber: { contains: query } },
-              { articleText: { contains: query, mode: 'insensitive' } },
-              { articleTextClean: { contains: query, mode: 'insensitive' } },
-            ],
-          }
-        : undefined,
+      where:
+        query || statusFilter !== 'all'
+          ? {
+              AND: [
+                query
+                  ? {
+                      OR: [
+                        { articleNumber: { contains: query } },
+                        { articleText: { contains: query, mode: 'insensitive' } },
+                        {
+                          articleTextClean: {
+                            contains: query,
+                            mode: 'insensitive',
+                          },
+                        },
+                        {
+                          articleTextReviewed: {
+                            contains: query,
+                            mode: 'insensitive',
+                          },
+                        },
+                      ],
+                    }
+                  : {},
+                statusFilter !== 'all'
+                  ? {
+                      reviewStatus: statusFilter,
+                    }
+                  : {},
+              ],
+            }
+          : undefined,
       include: {
         legalSource: {
           include: {
@@ -475,10 +922,23 @@ export default async function LegalSourcesAdminPage({
           <p style={styles.label}>Hukumx Admin</p>
           <h1 style={styles.title}>إدارة المصادر القانونية</h1>
           <p style={styles.subtitle}>
-            هذه نسخة قراءة فقط لعرض الدول والقوانين والمواد القانونية الموجودة
-            داخل قاعدة البيانات.
+            هذه نسخة إدارية لعرض الدول والقوانين والمواد القانونية الموجودة داخل
+            قاعدة البيانات، ومتابعة مراجعة النصوص القانونية واعتمادها.
           </p>
         </section>
+
+        {saved === 'ai-batch' && (
+          <div style={styles.successBox}>
+            تم توليد نصوص مقترحة بالذكاء الصناعي لعدد {processed || '0'} مواد.
+            راجع المواد التي أصبحت بحالة "تحتاج مراجعة" ثم اعتمد الصحيح منها.
+          </div>
+        )}
+
+        {saved === 'ai-empty' && (
+          <div style={styles.warningBox}>
+            لا توجد مواد جديدة بحالة "غير مراجعة" لمعالجتها بالذكاء الصناعي.
+          </div>
+        )}
 
         <section style={styles.statsGrid}>
           <div style={styles.statCard}>
@@ -497,8 +957,33 @@ export default async function LegalSourcesAdminPage({
           </div>
         </section>
 
+        <section style={styles.statsGrid}>
+          <div style={styles.statCard}>
+            <div style={styles.statLabel}>مواد معتمدة</div>
+            <div style={{ ...styles.statNumber, color: '#86efac' }}>
+              {approvedArticlesCount}
+            </div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.statLabel}>تحتاج مراجعة</div>
+            <div style={{ ...styles.statNumber, color: '#fbbf24' }}>
+              {needsReviewArticlesCount}
+            </div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.statLabel}>غير مراجعة</div>
+            <div style={{ ...styles.statNumber, color: '#fecaca' }}>
+              {pendingArticlesCount}
+            </div>
+          </div>
+        </section>
+
         <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>القوانين الموجودة</h2>
+          <h2 style={{ ...styles.sectionTitle, marginBottom: '20px' }}>
+            القوانين الموجودة
+          </h2>
 
           <div style={styles.tableWrap}>
             <table style={styles.table}>
@@ -536,7 +1021,30 @@ export default async function LegalSourcesAdminPage({
         </section>
 
         <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>المواد القانونية</h2>
+          <div style={styles.sectionHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>المواد القانونية</h2>
+              <p style={{ ...styles.subtitle, marginTop: '8px', fontSize: 14 }}>
+                زر الذكاء الصناعي يعالج الدفعة التالية فقط من المواد غير المراجعة
+                بحد أقصى {AI_BATCH_SIZE} مواد في كل مرة، ولا يلمس المواد المعتمدة.
+              </p>
+            </div>
+
+            <form action={suggestAiReviewedArticlesBatch}>
+              <input name="key" type="hidden" value={adminKey} />
+              <button
+                type="submit"
+                disabled={pendingArticlesCount === 0}
+                style={{
+                  ...styles.aiButton,
+                  opacity: pendingArticlesCount === 0 ? 0.55 : 1,
+                  cursor: pendingArticlesCount === 0 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                اقتراح نص مصحح بالذكاء الصناعي للدفعة التالية
+              </button>
+            </form>
+          </div>
 
           <form method="GET" style={styles.formRow}>
             <input name="key" type="hidden" value={adminKey} />
@@ -549,6 +1057,13 @@ export default async function LegalSourcesAdminPage({
               style={styles.input}
             />
 
+            <select name="status" defaultValue={statusFilter} style={styles.select}>
+              <option value="all">كل المواد</option>
+              <option value="approved">مواد معتمدة</option>
+              <option value="needs_review">تحتاج مراجعة</option>
+              <option value="pending">غير مراجعة</option>
+            </select>
+
             <button type="submit" style={styles.button}>
               بحث
             </button>
@@ -556,85 +1071,77 @@ export default async function LegalSourcesAdminPage({
 
           <div>
             {articles.map((article: AdminArticle) => {
-  const fullArticleText = formatArticleTextForAdmin(
-    getBestAdminArticleText(article)
-  );
+              const fullArticleText = formatArticleTextForAdmin(
+                getBestAdminArticleText(article)
+              );
 
-  const reviewHref = `/admin/legal-sources/review?key=${encodeURIComponent(
-    adminKey
-  )}&article=${encodeURIComponent(article.articleNumber)}`;
+              const reviewHref = `/admin/legal-sources/review?key=${encodeURIComponent(
+                adminKey
+              )}&article=${encodeURIComponent(article.articleNumber)}`;
 
-  return (
-    <article key={article.id} style={styles.articleCard}>
-      <div style={styles.articleHeader}>
-        <span style={styles.articleNumber}>
-          المادة {article.articleNumber}
-        </span>
+              return (
+                <article key={article.id} style={styles.articleCard}>
+                  <div style={styles.articleHeader}>
+                    <span style={styles.articleNumber}>
+                      المادة {article.articleNumber}
+                    </span>
 
-        <span style={styles.articleSource}>
-          {article.legalSource.country.nameAr} —{' '}
-          {article.legalSource.titleAr}
-        </span>
+                    <span style={styles.articleSource}>
+                      {article.legalSource.country.nameAr} —{' '}
+                      {article.legalSource.titleAr}
+                    </span>
 
-        <div style={styles.articleActions}>
-          {article.reviewStatus === 'approved' && (
-            <span
-              style={{
-                border: '1px solid rgba(34, 197, 94, 0.45)',
-                background: 'rgba(34, 197, 94, 0.12)',
-                color: '#86efac',
-                borderRadius: '999px',
-                padding: '6px 12px',
-                fontSize: '12px',
-                fontWeight: 900,
-              }}
-            >
-              نص معتمد
-            </span>
-          )}
+                    <div style={styles.articleActions}>
+                      {article.reviewStatus === 'approved' && (
+                        <span style={styles.badge}>نص معتمد</span>
+                      )}
 
-          <a href={reviewHref} style={styles.reviewButton}>
-            مراجعة المادة
-          </a>
-        </div>
-      </div>
+                      <span style={styles.reviewStatusBadge}>
+                        {getReviewStatusLabel(article.reviewStatus)}
+                      </span>
 
-      <p style={styles.articleText}>{trimText(fullArticleText)}</p>
+                      <a href={reviewHref} style={styles.reviewButton}>
+                        مراجعة المادة
+                      </a>
+                    </div>
+                  </div>
 
-      <details
-        style={{
-          marginTop: '14px',
-          borderTop: '1px solid rgba(148, 163, 184, 0.16)',
-          paddingTop: '14px',
-        }}
-      >
-        <summary
-          style={{
-            cursor: 'pointer',
-            color: '#fbbf24',
-            fontWeight: 900,
-            fontSize: '14px',
-            marginBottom: '12px',
-          }}
-        >
-          عرض المادة كاملة
-        </summary>
+                  <p style={styles.articleText}>{trimText(fullArticleText)}</p>
 
-        <p
-          style={{
-            color: '#f8fafc',
-            fontSize: '15px',
-            lineHeight: 2.1,
-            whiteSpace: 'pre-line',
-            margin: '12px 0 0 0',
-          }}
-        >
-          {fullArticleText}
-        </p>
-      </details>
-    </article>
-  );
-})}
+                  <details
+                    style={{
+                      marginTop: '14px',
+                      borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+                      paddingTop: '14px',
+                    }}
+                  >
+                    <summary
+                      style={{
+                        cursor: 'pointer',
+                        color: '#fbbf24',
+                        fontWeight: 900,
+                        fontSize: '14px',
+                        marginBottom: '12px',
+                      }}
+                    >
+                      عرض المادة كاملة
+                    </summary>
+
+                    <p
+                      style={{
+                        color: '#f8fafc',
+                        fontSize: '15px',
+                        lineHeight: 2.1,
+                        whiteSpace: 'pre-line',
+                        margin: '12px 0 0 0',
+                      }}
+                    >
+                      {fullArticleText}
+                    </p>
+                  </details>
+                </article>
+              );
+            })}
 
             {articles.length === 0 && (
               <div
@@ -671,9 +1178,9 @@ export default async function LegalSourcesAdminPage({
                 <a
                   href={`/admin/legal-sources?key=${encodeURIComponent(
                     adminKey
-                  )}&q=${encodeURIComponent(query)}&page=${
-                    safeCurrentPage - 1
-                  }`}
+                  )}&q=${encodeURIComponent(query)}&status=${encodeURIComponent(
+                    statusFilter
+                  )}&page=${safeCurrentPage - 1}`}
                   style={{
                     ...styles.button,
                     textDecoration: 'none',
@@ -690,9 +1197,9 @@ export default async function LegalSourcesAdminPage({
                 <a
                   href={`/admin/legal-sources?key=${encodeURIComponent(
                     adminKey
-                  )}&q=${encodeURIComponent(query)}&page=${
-                    safeCurrentPage + 1
-                  }`}
+                  )}&q=${encodeURIComponent(query)}&status=${encodeURIComponent(
+                    statusFilter
+                  )}&page=${safeCurrentPage + 1}`}
                   style={{
                     ...styles.button,
                     textDecoration: 'none',
