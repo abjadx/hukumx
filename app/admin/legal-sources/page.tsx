@@ -433,6 +433,38 @@ export default async function LegalSourcesAdminPage({
                 <p style={styles.articleText}>
                   {trimText(article.articleTextClean || article.articleText)}
                 </p>
+
+                <details
+                  style={{
+                    marginTop: '14px',
+                    borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+                    paddingTop: '14px',
+                  }}
+                >
+                  <summary
+                    style={{
+                    cursor: 'pointer',
+                    color: '#fbbf24',
+                    fontWeight: 900,
+                    fontSize: '14px',
+                    marginBottom: '12px',
+                  }}
+                >
+                  عرض المادة كاملة      
+                </summary>
+
+                <p
+                  style={{
+                    color: '#f8fafc',
+                    fontSize: '15px',
+                    lineHeight: 2.1,
+                    whiteSpace: 'pre-wrap',
+                    margin: '12px 0 0 0',
+                  }}
+                >
+                  {article.articleTextClean || article.articleText}
+                </p>
+              </details>
               </article>
             ))}
 
