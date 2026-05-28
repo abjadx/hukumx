@@ -25,6 +25,16 @@ function getSingleParam(value?: string | string[]) {
   if (Array.isArray(value)) return value[0] || '';
   return value || '';
 }
+function compareArticleNumbers(a: string, b: string) {
+  const numberA = Number(a);
+  const numberB = Number(b);
+
+  if (Number.isFinite(numberA) && Number.isFinite(numberB)) {
+    return numberA - numberB;
+  }
+
+  return a.localeCompare(b, 'ar');
+}
 
 function extractOutputText(response: unknown): string {
   if (
@@ -559,6 +569,33 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
     article?.articleTextClean ||
     article?.articleText ||
     '';
+  const needsReviewArticles = article
+  ? await prisma.legalArticle.findMany({
+      where: {
+        reviewStatus: 'needs_review',
+        legalSource: {
+          isActive: true,
+        },
+        NOT: {
+          id: article.id,
+        },
+      },
+      select: {
+        articleNumber: true,
+      },
+    })
+  : [];
+
+const sortedNeedsReviewArticles = [...needsReviewArticles].sort((a, b) =>
+  compareArticleNumbers(a.articleNumber, b.articleNumber)
+);
+
+const nextReviewArticle =
+  article && sortedNeedsReviewArticles.length
+    ? sortedNeedsReviewArticles.find(
+        (item) => compareArticleNumbers(item.articleNumber, article.articleNumber) > 0
+      ) || sortedNeedsReviewArticles[0]
+    : null;
 
   return (
     <main style={styles.page}>
@@ -571,25 +608,56 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
             الذي سنجعله لاحقًا يظهر للمستخدم بدل النص المستخرج تلقائيًا.
           </p>
 
-          <a
-            href={`/admin/legal-sources?key=${encodeURIComponent(adminKey)}`}
+          <div
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px solid rgba(148, 163, 184, 0.35)',
-              background: '#1e293b',
-              color: '#f8fafc',
-              borderRadius: '16px',
-              padding: '14px 22px',
-              fontWeight: 900,
-              fontSize: '14px',
-              textDecoration: 'none',
+              display: 'flex',
+              gap: '12px',
+              flexWrap: 'wrap',
               marginTop: '18px',
             }}
           >
-            العودة إلى الشاشة الرئيسية
-          </a>
+            <a
+              href={`/admin/legal-sources?key=${encodeURIComponent(adminKey)}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(148, 163, 184, 0.35)',
+                background: '#1e293b',
+                color: '#f8fafc',
+                borderRadius: '16px',
+                padding: '14px 22px',
+                fontWeight: 900,
+                fontSize: '14px',
+                textDecoration: 'none',
+              }}
+            >
+              العودة إلى الشاشة الرئيسية
+            </a>
+
+            {nextReviewArticle && (
+              <a
+                href={`/admin/legal-sources/review?key=${encodeURIComponent(
+                  adminKey
+                )}&article=${encodeURIComponent(nextReviewArticle.articleNumber)}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid rgba(96, 165, 250, 0.45)',
+                  background: 'rgba(37, 99, 235, 0.22)',
+                  color: '#bfdbfe',
+                  borderRadius: '16px',
+                  padding: '14px 22px',
+                  fontWeight: 900,
+                  fontSize: '14px',
+                  textDecoration: 'none',
+                }}
+              >
+                المادة التالية التي تحتاج مراجعة
+              </a>
+            )}
+          </div>
         </section>
 
         {saved === '1' && (
