@@ -712,6 +712,7 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
   const approvedCount = allArticles.filter((article) => article.reviewStatus === 'approved').length;
   const needsReviewCount = allArticles.filter((article) => article.reviewStatus === 'needs_review').length;
   const pendingCount = allArticles.filter((article) => article.reviewStatus === 'pending').length;
+  const aiUnprocessedCount = allArticles.filter((article) => article.reviewStatus !== 'approved' && !article.articleTextClean?.trim()).length;
   const unprocessedAiCount = allArticles.filter((article) => !article.articleTextClean?.trim()).length;
 
   const filteredArticles = allArticles
@@ -750,7 +751,8 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
           <LegalSourceAiProcessAllButton
             sourceId={source.id}
             adminKey={adminKey}
-            initialPendingCount={unprocessedAiCount}
+            initialRemaining={aiUnprocessedCount}
+            batchSize={5}
           />
           <form action={processLegalSourceArticlesBatch} style={{ margin: 0 }}>
             <input name="key" type="hidden" value={adminKey} />

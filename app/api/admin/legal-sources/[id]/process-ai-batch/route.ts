@@ -1,236 +1,404 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import OpenAI from 'openai';
+import { prisma } from '../../../../../lib/prisma';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const AR = {
-  article: '\u0627\u0644\u0645\u0627\u062f\u0629',
-  articleText: '\u0646\u0635 \u0627\u0644\u0645\u0627\u062f\u0629',
-  from: '\u0645\u0646',
-  thisLaw: '\u0647\u0630\u0627 \u0627\u0644\u0642\u0627\u0646\u0648\u0646',
-  articleNumber: '\u0627\u0644\u0645\u0627\u062f\u0629 \u0631\u0642\u0645',
-  paragraphNumber: '\u0627\u0644\u0641\u0642\u0631\u0629 \u0631\u0642\u0645',
-  number: '\u0631\u0642\u0645',
-  jordan1: '\u0627\u0644\u0623\u0631\u062f\u0646',
-  jordan2: '\u0627\u0644\u0627\u0631\u062f\u0646',
-  jordanAdjective: '\u0627\u0644\u0623\u0631\u062f\u0646\u064a',
-  civilProcedureTitle: '\u0642\u0627\u0646\u0648\u0646 \u0623\u0635\u0648\u0644 \u0627\u0644\u0645\u062d\u0627\u0643\u0645\u0627\u062a \u0627\u0644\u0645\u062f\u0646\u064a\u0629 \u0627\u0644\u0623\u0631\u062f\u0646\u064a',
+const OPENAI_REVIEW_MODEL = process.env.OPENAI_REVIEW_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const DEFAULT_BATCH_SIZE = 5;
+const MAX_BATCH_SIZE = 10;
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+type RouteContext = {
+  params: Promise<{
+    id?: string;
+  }>;
 };
 
-function normalizeArticleNumber(value: string): string {
-  return value.replace(/[^\d]/g, '').trim();
+type LegalArticleForProcessing = {
+  id: string;
+  articleNumber: string;
+  articleText: string;
+  articleTextClean: string | null;
+  articleTextReviewed: string | null;
+  reviewNotes: string | null;
+  reviewStatus: string;
+  legalSource: {
+    titleAr: string;
+    country: {
+      nameAr: string;
+    };
+  };
+};
+
+function extractOutputText(response: unknown): string {
+  if (
+    typeof response === 'object' &&
+    response !== null &&
+    'output_text' in response &&
+    typeof response.output_text === 'string'
+  ) {
+    return response.output_text;
+  }
+
+  if (
+    typeof response === 'object' &&
+    response !== null &&
+    'output' in response &&
+    Array.isArray(response.output)
+  ) {
+    for (const item of response.output) {
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        'content' in item &&
+        Array.isArray(item.content)
+      ) {
+        for (const contentItem of item.content) {
+          if (
+            typeof contentItem === 'object' &&
+            contentItem !== null &&
+            'type' in contentItem &&
+            'text' in contentItem &&
+            (contentItem.type === 'output_text' || contentItem.type === 'text') &&
+            typeof contentItem.text === 'string'
+          ) {
+            return contentItem.text;
+          }
+        }
+      }
+    }
+  }
+
+  return '';
 }
 
-function normalizeText(value: string): string {
-  return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+function convertArabicDigits(value: string) {
+  const map: Record<string, string> = {
+    '٠': '0',
+    '١': '1',
+    '٢': '2',
+    '٣': '3',
+    '٤': '4',
+    '٥': '5',
+    '٦': '6',
+    '٧': '7',
+    '٨': '8',
+    '٩': '9',
+  };
+
+  return value.replace(/[٠-٩]/g, (digit) => map[digit] || digit);
 }
 
-function cleanArticleTextForDisplay(value: string): string {
-  const articleWord = AR.article;
-  const fromWord = AR.from;
-  const thisLaw = AR.thisLaw;
+function getArticleNumberValue(value: string) {
+  const normalized = convertArabicDigits(value)
+    .replace(/^المادة\s*/u, '')
+    .replace(/^مادة\s*/u, '')
+    .replace(/[^0-9.\-]/g, '')
+    .trim();
 
+  const directNumber = Number(normalized);
+  if (Number.isFinite(directNumber)) return directNumber;
+
+  const firstNumber = Number(normalized.match(/\d+/)?.[0] || '');
+  return Number.isFinite(firstNumber) ? firstNumber : Number.MAX_SAFE_INTEGER;
+}
+
+function compareArticleNumbers(a: string, b: string) {
+  const numberA = getArticleNumberValue(a);
+  const numberB = getArticleNumberValue(b);
+
+  if (numberA !== numberB) return numberA - numberB;
+  return a.localeCompare(b, 'ar', { numeric: true });
+}
+
+function getSafeBatchSize(value: unknown) {
+  const numeric = Number(value || DEFAULT_BATCH_SIZE);
+
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_BATCH_SIZE;
+  return Math.min(Math.max(Math.floor(numeric), 1), MAX_BATCH_SIZE);
+}
+
+function normalizeText(value: string) {
   return value
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
     .replace(/\u00a0/g, ' ')
-    .replace(/[（]/g, '(')
-    .replace(/[）]/g, ')')
     .replace(/[ \t]+/g, ' ')
-
-    // 3( ) من المادة 123( ) => الفقرة رقم 3 من المادة رقم 123
-    .replace(
-      new RegExp(`(\\d+)\\s*\\(\\s*\\)\\s+${fromWord}\\s+${articleWord}\\s+(\\d+)\\s*\\(\\s*\\)`, 'g'),
-      (_match, paragraphNumber: string, articleNumber: string) =>
-        `${AR.paragraphNumber} ${paragraphNumber} ${AR.from} ${AR.articleNumber} ${articleNumber}`
-    )
-
-    // 3( من المادة 123( => الفقرة رقم 3 من المادة رقم 123
-    .replace(
-      new RegExp(`(\\d+)\\s*\\(\\s+${fromWord}\\s+${articleWord}\\s+(\\d+)\\s*\\(`, 'g'),
-      (_match, paragraphNumber: string, articleNumber: string) =>
-        `${AR.paragraphNumber} ${paragraphNumber} ${AR.from} ${AR.articleNumber} ${articleNumber}`
-    )
-
-    // 3( ) من المادة 123 => الفقرة رقم 3 من المادة رقم 123
-    .replace(
-      new RegExp(`(\\d+)\\s*\\(\\s*\\)\\s+${fromWord}\\s+${articleWord}\\s+(\\d+)`, 'g'),
-      (_match, paragraphNumber: string, articleNumber: string) =>
-        `${AR.paragraphNumber} ${paragraphNumber} ${AR.from} ${AR.articleNumber} ${articleNumber}`
-    )
-
-    // 3( ) من المادة => الفقرة رقم 3 من المادة
-    .replace(
-      new RegExp(`(\\d+)\\s*\\(\\s*\\)\\s+${fromWord}\\s+${articleWord}`, 'g'),
-      (_match, paragraphNumber: string) =>
-        `${AR.paragraphNumber} ${paragraphNumber} ${AR.from} ${articleWord}`
-    )
-
-    // المادة 170( ) / المادة 170() / المادة 170( => المادة رقم 170
-    .replace(
-      new RegExp(`${articleWord}\\s+(\\d+)\\s*\\(\\s*\\)`, 'g'),
-      (_match, articleNumber: string) => `${AR.articleNumber} ${articleNumber}`
-    )
-    .replace(
-      new RegExp(`${articleWord}\\s+(\\d+)\\s*\\(`, 'g'),
-      (_match, articleNumber: string) => `${AR.articleNumber} ${articleNumber}`
-    )
-
-    // 12() من هذا القانون => المادة رقم 12 من هذا القانون
-    .replace(
-      new RegExp(`(\\d+)\\s*\\(\\s*\\)\\s+${fromWord}\\s+${thisLaw}`, 'g'),
-      (_match, articleNumber: string) => `${AR.articleNumber} ${articleNumber} ${AR.from} ${thisLaw}`
-    )
-    .replace(
-      new RegExp(`(\\d+)\\s*\\(\\s+${fromWord}\\s+${thisLaw}`, 'g'),
-      (_match, articleNumber: string) => `${AR.articleNumber} ${articleNumber} ${AR.from} ${thisLaw}`
-    )
-
-    // بداية السطر: 2( النص أو 2) النص أو 2( ) النص => 2. النص
-    .replace(/^\s*(\d+)\s*\(\s*\)\s*/gm, '$1. ')
-    .replace(/^\s*(\d+)\s*\(\s*/gm, '$1. ')
-    .replace(/^\s*(\d+)\s*\)\s*/gm, '$1. ')
-
-    // أي رقم متبقٍ بهذا الشكل 123( ) / 123() / 123( => رقم 123
-    .replace(/(\d+)\s*\(\s*\)/g, (_match, number: string) => `${AR.number} ${number}`)
-    .replace(/(\d+)\s*\(/g, (_match, number: string) => `${AR.number} ${number}`)
-
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/^\s*-\s*(\d+)\s*[-–]\s*/gm, '$1. ')
-    .replace(/^\s*-\s*(\d+)(?=[\u0600-\u06FF])/gm, '$1. ')
-    .replace(/^\s*(\d+)(?=[\u0600-\u06FF])/gm, '$1. ')
-    .replace(/(\d+)(?=[\u0600-\u06FF])/g, '$1 ')
-    .replace(/\s+([،.:؛])/g, '$1')
-    .replace(/([،.:؛])([^\s\n])/g, '$1 $2')
     .trim();
 }
 
-function extractArticleText(fileContent: string, articleNumber: string): string {
-  const normalizedContent = normalizeText(fileContent);
-  const safeArticleNumber = normalizeArticleNumber(articleNumber);
+async function generateAiCleanText(article: LegalArticleForProcessing) {
+  const sourceText = article.articleText;
 
-  if (!safeArticleNumber) return '';
+  const response = await openai.responses.create({
+    model: OPENAI_REVIEW_MODEL,
+    temperature: 0,
+    input: [
+      {
+        role: 'system',
+        content: `
+أنت محرر ومدقق قانوني عربي متخصص في تنظيف وتصحيح مواد قانونية مستخرجة من PDF/OCR.
 
-  const startPattern = new RegExp(
-    `(^|\\n)\\s*#{1,6}\\s*${AR.article}\\s+${safeArticleNumber}\\s*(?=\\n)`,
-    'm'
-  );
+المطلوب:
+- صحح أخطاء OCR والتنضيد الواضحة.
+- ادمج الأسطر المقطوعة داخل الجملة الواحدة.
+- حافظ على نص المادة كاملًا.
+- لا تلخص.
+- لا تضف حكمًا قانونيًا جديدًا.
+- لا تحذف حكمًا قانونيًا موجودًا.
+- لا تشرح.
+- أعد JSON فقط.
 
-  const startMatch = normalizedContent.match(startPattern);
+أعد النتيجة بهذا الشكل:
+{
+  "correctedText": "النص المعالج كاملًا",
+  "detectedIssues": ["أخطاء تم تصحيحها"],
+  "uncertainTerms": ["كلمات تحتاج مراجعة بشرية"]
+}
+        `.trim(),
+      },
+      {
+        role: 'user',
+        content: `
+الدولة: ${article.legalSource.country.nameAr}
+التشريع: ${article.legalSource.titleAr}
+رقم المادة: ${article.articleNumber}
 
-  if (!startMatch || startMatch.index === undefined) {
-    return '';
+النص الأصلي المستخرج من الملف:
+${sourceText}
+        `.trim(),
+      },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'legal_article_ai_cleaning',
+        strict: true,
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            correctedText: { type: 'string' },
+            detectedIssues: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            uncertainTerms: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+          required: ['correctedText', 'detectedIssues', 'uncertainTerms'],
+        },
+      },
+    },
+  });
+
+  const outputText = extractOutputText(response).trim();
+
+  if (!outputText) {
+    throw new Error('AI did not return output text');
   }
 
-  const startIndex =
-    startMatch.index + (startMatch[1] ? startMatch[1].length : 0);
-
-  const remainingText = normalizedContent.slice(startIndex);
-
-  const nextArticlePattern = new RegExp(
-    `\\n\\s*#{1,6}\\s*${AR.article}\\s+\\d+\\s*(?=\\n)`,
-    'm'
-  );
-
-  const nextMatch = remainingText.slice(1).match(nextArticlePattern);
-
-  const articleBlock =
-    nextMatch?.index !== undefined
-      ? remainingText.slice(0, nextMatch.index + 1)
-      : remainingText;
-
-  const textSectionPattern = new RegExp(`${AR.articleText}\\s*:\\s*([\\s\\S]*)`);
-  const textSectionMatch = articleBlock.match(textSectionPattern);
-
-  const cleanedText = textSectionMatch?.[1]
-    ? textSectionMatch[1]
-    : articleBlock;
-
-  return cleanArticleTextForDisplay(
-    cleanedText.replace(/\n---\s*$/g, '').trim()
-  );
-}
-
-export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      country?: string;
-      sourceTitle?: string;
-      articleNumber?: string;
+    const parsed = JSON.parse(outputText) as {
+      correctedText?: string;
+      detectedIssues?: unknown[];
+      uncertainTerms?: unknown[];
     };
 
-    const articleNumber = normalizeArticleNumber(
-      String(body.articleNumber || '')
-    );
+    const correctedText = normalizeText(String(parsed.correctedText || ''));
+    const detectedIssues = Array.isArray(parsed.detectedIssues)
+      ? parsed.detectedIssues.filter((item): item is string => typeof item === 'string')
+      : [];
+    const uncertainTerms = Array.isArray(parsed.uncertainTerms)
+      ? parsed.uncertainTerms.filter((item): item is string => typeof item === 'string')
+      : [];
 
-    if (!articleNumber) {
-      return NextResponse.json(
-        { error: '\u0631\u0642\u0645 \u0627\u0644\u0645\u0627\u062f\u0629 \u0645\u0637\u0644\u0648\u0628.' },
-        { status: 400 }
-      );
+    if (!correctedText) {
+      throw new Error('AI returned empty correctedText');
     }
 
-    const country = String(body.country || '').trim();
-    const sourceTitle = String(body.sourceTitle || '').trim();
+    return {
+      correctedText,
+      notes: [
+        'تم توليد هذا النص كنسخة معالجة بالذكاء الصناعي. يحتاج مراجعة واعتماد قبل اعتماده كنص نهائي.',
+        detectedIssues.length ? `الأخطاء المكتشفة: ${detectedIssues.join(' | ')}` : '',
+        uncertainTerms.length ? `كلمات تحتاج مراجعة: ${uncertainTerms.join(' | ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    };
+  } catch {
+    const fallbackText = normalizeText(outputText);
 
-    const isJordan =
-      country === AR.jordan1 ||
-      country === AR.jordan2 ||
-      country.toLowerCase() === 'jordan' ||
-      sourceTitle.includes(AR.jordanAdjective) ||
-      sourceTitle.includes(AR.jordan1);
-
-    if (!isJordan) {
-      return NextResponse.json(
-        { error: '\u0647\u0630\u0627 \u0627\u0644\u0645\u0635\u062f\u0631 \u0627\u0644\u0642\u0627\u0646\u0648\u0646\u064a \u063a\u064a\u0631 \u0645\u062f\u0639\u0648\u0645 \u062d\u0627\u0644\u064a\u0627.' },
-        { status: 400 }
-      );
+    if (!fallbackText) {
+      throw new Error('Unable to parse AI output');
     }
 
-    const filePath = path.join(
-      process.cwd(),
-      'legal-sources',
-      'jordan',
-      'Jordan_Civil_Procedure_Law_RAG.md'
-    );
+    return {
+      correctedText: fallbackText,
+      notes: 'تم توليد نص معالج بالذكاء الصناعي، لكن النظام لم يستطع قراءة تقرير التصحيح كـ JSON منظم.',
+    };
+  }
+}
 
-    let fileContent = '';
-
-    try {
-      fileContent = await fs.readFile(filePath, 'utf8');
-    } catch {
-      return NextResponse.json(
-        {
-          error:
-            'Legal source file was not found. Make sure legal-sources/jordan/Jordan_Civil_Procedure_Law_RAG.md exists.',
+async function getProgress(sourceId: string) {
+  const [totalArticles, processedArticles, approvedArticles, remainingArticles] = await Promise.all([
+    prisma.legalArticle.count({ where: { legalSourceId: sourceId } }),
+    prisma.legalArticle.count({
+      where: {
+        legalSourceId: sourceId,
+        articleTextClean: {
+          not: null,
         },
-        { status: 404 }
-      );
-    }
-
-    const articleText = extractArticleText(fileContent, articleNumber);
-
-    if (!articleText) {
-      return NextResponse.json(
-        {
-          error: `Article ${articleNumber} was not found in the current legal source file.`,
+      },
+    }),
+    prisma.legalArticle.count({
+      where: {
+        legalSourceId: sourceId,
+        reviewStatus: 'approved',
+      },
+    }),
+    prisma.legalArticle.count({
+      where: {
+        legalSourceId: sourceId,
+        reviewStatus: {
+          not: 'approved',
         },
-        { status: 404 }
+        OR: [{ articleTextClean: null }, { articleTextClean: '' }],
+      },
+    }),
+  ]);
+
+  return {
+    totalArticles,
+    processedArticles,
+    approvedArticles,
+    remainingArticles,
+  };
+}
+
+export async function POST(req: NextRequest, context: RouteContext) {
+  try {
+    const { id: sourceId = '' } = await context.params;
+    const body = (await req.json().catch(() => ({}))) as {
+      key?: string;
+      batchSize?: number;
+    };
+
+    const adminKey = String(body.key || '');
+    const expectedAdminKey = process.env.ADMIN_ACCESS_KEY;
+
+    if (!expectedAdminKey || adminKey !== expectedAdminKey) {
+      return NextResponse.json({ success: false, error: 'غير مصرح.' }, { status: 401 });
+    }
+
+    if (!sourceId) {
+      return NextResponse.json({ success: false, error: 'رقم التشريع مطلوب.' }, { status: 400 });
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { success: false, error: 'OPENAI_API_KEY غير موجود في إعدادات البيئة.' },
+        { status: 500 }
       );
     }
+
+    const legalSource = await prisma.legalSource.findUnique({
+      where: { id: sourceId },
+      select: { id: true, titleAr: true },
+    });
+
+    if (!legalSource) {
+      return NextResponse.json({ success: false, error: 'التشريع غير موجود.' }, { status: 404 });
+    }
+
+    const batchSize = getSafeBatchSize(body.batchSize);
+
+    const candidateArticles = await prisma.legalArticle.findMany({
+      where: {
+        legalSourceId: sourceId,
+        reviewStatus: {
+          not: 'approved',
+        },
+        OR: [{ articleTextClean: null }, { articleTextClean: '' }],
+      },
+      include: {
+        legalSource: {
+          include: {
+            country: true,
+          },
+        },
+      },
+    });
+
+    const batchArticles = (candidateArticles as LegalArticleForProcessing[])
+      .sort((a, b) => compareArticleNumbers(a.articleNumber, b.articleNumber))
+      .slice(0, batchSize);
+
+    const processedArticleNumbers: string[] = [];
+
+    for (const article of batchArticles) {
+      try {
+        const { correctedText, notes } = await generateAiCleanText(article);
+
+        await prisma.legalArticle.update({
+          where: { id: article.id },
+          data: {
+            articleTextClean: correctedText,
+            reviewStatus: 'needs_review',
+            reviewNotes: [article.reviewNotes || '', notes].filter(Boolean).join('\n\n'),
+            reviewedAt: null,
+            reviewedBy: null,
+          },
+        });
+
+        processedArticleNumbers.push(article.articleNumber);
+      } catch (error) {
+        await prisma.legalArticle.update({
+          where: { id: article.id },
+          data: {
+            reviewStatus: 'needs_review',
+            reviewNotes: [
+              article.reviewNotes || '',
+              `فشلت معالجة هذه المادة بالذكاء الصناعي: ${
+                error instanceof Error ? error.message : 'Unknown error'
+              }`,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          },
+        });
+      }
+    }
+
+    const progress = await getProgress(sourceId);
 
     return NextResponse.json({
-      articleNumber,
-      sourceTitle: sourceTitle || AR.civilProcedureTitle,
-      articleText,
+      success: true,
+      data: {
+        sourceId,
+        sourceTitle: legalSource.titleAr,
+        batchSize,
+        processedCount: processedArticleNumbers.length,
+        processedArticleNumbers,
+        ...progress,
+      },
     });
   } catch (error) {
-    console.error('Legal article lookup error:', error);
-
     return NextResponse.json(
-      { error: '\u062d\u062f\u062b \u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u062c\u0644\u0628 \u0646\u0635 \u0627\u0644\u0645\u0627\u062f\u0629 \u0627\u0644\u0642\u0627\u0646\u0648\u0646\u064a\u0629.' },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'حدث خطأ غير معروف أثناء معالجة التشريع.',
+      },
       { status: 500 }
     );
   }

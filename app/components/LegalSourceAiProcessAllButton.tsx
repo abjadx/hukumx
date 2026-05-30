@@ -1,187 +1,182 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import type { CSSProperties } from 'react';
-
-type ProcessedArticle = {
-  id: string;
-  articleNumber: string;
-};
-
-type BatchResponse = {
-  success?: boolean;
-  error?: string;
-  data?: {
-    processedCount: number;
-    failedCount: number;
-    remainingCount: number;
-    done: boolean;
-    processedArticles: ProcessedArticle[];
-    failedArticles: { id: string; articleNumber: string; error: string }[];
-  };
-};
+import { CSSProperties, useMemo, useRef, useState } from 'react';
 
 type Props = {
   sourceId: string;
   adminKey: string;
-  initialPendingCount: number;
+  initialRemaining?: number;
   batchSize?: number;
+  style?: CSSProperties;
 };
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+type ProcessResponse = {
+  success?: boolean;
+  error?: string;
+  data?: {
+    processedCount?: number;
+    totalArticles?: number;
+    processedArticles?: number;
+    remainingArticles?: number;
+    processedArticleNumbers?: string[];
+  };
+};
 
-const buttonStyle: CSSProperties = {
+const defaultButtonStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  border: '1px solid rgba(96, 165, 250, 0.45)',
-  background: 'rgba(37, 99, 235, 0.24)',
-  color: '#bfdbfe',
-  borderRadius: '14px',
-  padding: '11px 15px',
+  border: '1px solid rgba(96, 165, 250, 0.55)',
+  background: 'rgba(37, 99, 235, 0.22)',
+  color: '#dbeafe',
+  borderRadius: '16px',
+  padding: '14px 18px',
   fontSize: '14px',
   fontWeight: 900,
   cursor: 'pointer',
-  minHeight: '44px',
-};
-
-const disabledButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  opacity: 0.65,
-  cursor: 'not-allowed',
-};
-
-const statusStyle: CSSProperties = {
-  color: '#93c5fd',
-  fontSize: '12px',
-  lineHeight: 1.8,
-  maxWidth: '360px',
-};
-
-const errorStyle: CSSProperties = {
-  color: '#fecaca',
-  fontSize: '12px',
-  lineHeight: 1.8,
-  maxWidth: '360px',
+  textDecoration: 'none',
+  minHeight: '48px',
 };
 
 export default function LegalSourceAiProcessAllButton({
   sourceId,
   adminKey,
-  initialPendingCount,
+  initialRemaining = 0,
   batchSize = 5,
+  style,
 }: Props) {
   const router = useRouter();
-  const [isRunning, setIsRunning] = useState(false);
-  const [remainingCount, setRemainingCount] = useState(initialPendingCount);
-  const [processedTotal, setProcessedTotal] = useState(0);
+  const shouldStopRef = useRef(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [remaining, setRemaining] = useState(initialRemaining);
+  const [processedInSession, setProcessedInSession] = useState(0);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  async function processAllArticles() {
-    if (isRunning || remainingCount <= 0) return;
+  const buttonLabel = useMemo(() => {
+    if (isProcessing) return `جاري المعالجة... المتبقي ${remaining}`;
+    if (remaining > 0) return `معالجة التشريع كاملًا بالذكاء الصناعي (${remaining})`;
+    return 'تمت معالجة كامل التشريع بالذكاء الصناعي';
+  }, [isProcessing, remaining]);
 
-    const confirmed = window.confirm(
-      `سيتم تشغيل معالجة الذكاء الصناعي على كامل التشريع على دفعات، كل دفعة ${batchSize} مواد. هل تريد المتابعة؟`
-    );
+  async function processOneBatch() {
+    const response = await fetch(`/api/admin/legal-sources/${encodeURIComponent(sourceId)}/process-ai-batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        key: adminKey,
+        batchSize,
+      }),
+    });
 
-    if (!confirmed) return;
+    const json = (await response.json()) as ProcessResponse;
 
-    setIsRunning(true);
+    if (!response.ok || !json.success) {
+      throw new Error(json.error || 'فشلت معالجة دفعة الذكاء الصناعي.');
+    }
+
+    return json.data || {};
+  }
+
+  async function processAll() {
+    if (isProcessing || remaining <= 0) return;
+
+    shouldStopRef.current = false;
+    setIsProcessing(true);
     setError('');
     setMessage('بدأت معالجة التشريع بالذكاء الصناعي...');
 
-    let keepGoing = true;
-    let totalProcessedInThisRun = 0;
-    let lastRemaining = remainingCount;
+    let safetyCounter = 0;
 
     try {
-      while (keepGoing) {
-        const response = await fetch(`/api/admin/legal-sources/${sourceId}/process-ai-batch`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            adminKey,
-            batchSize,
-          }),
-        });
+      while (!shouldStopRef.current) {
+        safetyCounter += 1;
 
-        const result = (await response.json()) as BatchResponse;
-
-        if (!response.ok || !result.success || !result.data) {
-          throw new Error(result.error || 'فشل تنفيذ دفعة المعالجة بالذكاء الصناعي.');
+        if (safetyCounter > 1000) {
+          throw new Error('تم إيقاف المعالجة احتياطيًا بسبب عدد دورات غير طبيعي.');
         }
 
-        const processedNumbers = result.data.processedArticles
-          .map((article) => article.articleNumber)
-          .join('، ');
+        const data = await processOneBatch();
+        const processedCount = data.processedCount || 0;
+        const nextRemaining = data.remainingArticles ?? 0;
+        const processedNumbers = data.processedArticleNumbers || [];
 
-        totalProcessedInThisRun += result.data.processedCount;
-        lastRemaining = result.data.remainingCount;
+        setProcessedInSession((value) => value + processedCount);
+        setRemaining(nextRemaining);
 
-        setProcessedTotal((previous) => previous + result.data!.processedCount);
-        setRemainingCount(result.data.remainingCount);
         setMessage(
-          result.data.processedCount > 0
-            ? `تمت معالجة دفعة: المواد ${processedNumbers || 'غير محدد'}. المتبقي: ${result.data.remainingCount}.`
-            : result.data.done
-              ? 'اكتملت معالجة التشريع بالكامل.'
-              : 'لم تتم معالجة أي مادة في هذه الدفعة.'
+          processedNumbers.length
+            ? `تمت معالجة المواد: ${processedNumbers.join('، ')}. المتبقي: ${nextRemaining}.`
+            : `لا توجد مواد جديدة في هذه الدفعة. المتبقي: ${nextRemaining}.`
         );
 
         router.refresh();
 
-        keepGoing =
-          !result.data.done &&
-          result.data.processedCount > 0 &&
-          result.data.remainingCount > 0;
-
-        if (keepGoing) {
-          await sleep(900);
+        if (processedCount === 0 || nextRemaining <= 0) {
+          break;
         }
       }
 
-      if (totalProcessedInThisRun > 0 || lastRemaining === 0) {
-        setMessage(
-          lastRemaining === 0
-            ? 'اكتملت معالجة التشريع بالكامل. يتم تحديث الصفحة الآن...'
-            : `توقفت المعالجة. تمت معالجة ${totalProcessedInThisRun} مادة، والمتبقي ${lastRemaining}.`
-        );
-        await sleep(900);
-        router.refresh();
-      }
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'حدث خطأ غير معروف أثناء المعالجة.');
+      setMessage((current) =>
+        shouldStopRef.current
+          ? `تم إيقاف المعالجة مؤقتًا. ${current}`
+          : `انتهت المعالجة أو لا توجد مواد إضافية. ${current}`
+      );
+    } catch (currentError) {
+      setError(currentError instanceof Error ? currentError.message : 'حدث خطأ غير معروف أثناء المعالجة.');
     } finally {
-      setIsRunning(false);
+      setIsProcessing(false);
+      router.refresh();
     }
   }
 
-  return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 6 }}>
-      <button
-        type="button"
-        onClick={processAllArticles}
-        disabled={isRunning || remainingCount <= 0}
-        style={isRunning || remainingCount <= 0 ? disabledButtonStyle : buttonStyle}
-      >
-        {isRunning
-          ? 'جاري معالجة التشريع...'
-          : remainingCount <= 0
-            ? 'تمت معالجة التشريع'
-            : `معالجة التشريع كاملًا بالذكاء الصناعي (${remainingCount})`}
-      </button>
+  function stopProcessing() {
+    shouldStopRef.current = true;
+    setMessage('سيتم إيقاف المعالجة بعد انتهاء الدفعة الحالية.');
+  }
 
-      {message && <span style={statusStyle}>{message}</span>}
-      {processedTotal > 0 && !error && (
-        <span style={statusStyle}>المواد المعالجة في هذه الجلسة: {processedTotal}</span>
-      )}
-      {error && <span style={errorStyle}>{error}</span>}
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '280px' }}>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={processAll}
+          disabled={isProcessing || remaining <= 0}
+          style={{
+            ...defaultButtonStyle,
+            ...style,
+            opacity: isProcessing || remaining <= 0 ? 0.72 : 1,
+            cursor: isProcessing || remaining <= 0 ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {buttonLabel}
+        </button>
+
+        {isProcessing && (
+          <button
+            type="button"
+            onClick={stopProcessing}
+            style={{
+              ...defaultButtonStyle,
+              border: '1px solid rgba(248, 113, 113, 0.45)',
+              background: 'rgba(127, 29, 29, 0.35)',
+              color: '#fecaca',
+            }}
+          >
+            إيقاف بعد هذه الدفعة
+          </button>
+        )}
+      </div>
+
+      <div style={{ color: '#cbd5e1', fontSize: '13px', lineHeight: 1.9 }}>
+        عالجت هذه الجلسة: {processedInSession} — المتبقي: {remaining}
+      </div>
+
+      {message && <div style={{ color: '#bfdbfe', fontSize: '13px', lineHeight: 1.9 }}>{message}</div>}
+      {error && <div style={{ color: '#fecaca', fontSize: '13px', lineHeight: 1.9 }}>{error}</div>}
     </div>
   );
 }
