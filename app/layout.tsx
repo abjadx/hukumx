@@ -1,21 +1,22 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import type { Metadata } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import UnifiedNav from './components/UnifiedNav';
+import './globals.css';
 
 const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
 });
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
 });
 
 export const metadata: Metadata = {
-  title: "Hukumx | مساعدك القانوني الذكي",
+  title: 'Hukumx | مساعدك القانوني الذكي',
   description:
-    "مساعد قانوني عربي مدعوم بالذكاء الاصطناعي لفهم المسائل القانونية وتوجيه المستخدمين بشكل أولي ومنظم.",
+    'مساعد قانوني عربي مدعوم بالذكاء الاصطناعي لفهم المسائل القانونية وتوجيه المستخدمين بشكل أولي ومنظم.',
 };
 
 export default function RootLayout({
@@ -29,7 +30,10 @@ export default function RootLayout({
       dir="rtl"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <UnifiedNav />
+        {children}
+      </body>
     </html>
   );
 }
