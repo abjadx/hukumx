@@ -988,6 +988,48 @@ export default function CaseDetailsPage() {
     }
   }
 
+
+
+  async function downloadCaseMemoWord() {
+    if (!caseMemo) {
+      setMemoError('لا توجد مذكرة قانونية محفوظة لتحميلها.');
+      return;
+    }
+
+    try {
+      setSaving('memo-word');
+      setMemoError('');
+      setSuccessMessage('');
+
+      const res = await fetch(`/api/cases/${caseId}/memo/word`, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error || 'فشل في تجهيز ملف Word للمذكرة');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = `hukumx-legal-memo-${caseId}.doc`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      setSuccessMessage('تم تجهيز وتحميل ملف Word للمذكرة القانونية');
+    } catch (err: any) {
+      setMemoError(err.message || 'تعذر تحميل المذكرة كملف Word');
+    } finally {
+      setSaving('');
+    }
+  }
+
   async function showArticleText(article: RelatedArticle) {
     setArticleCopied(false);
   const articleIdentifier = article.articleId || article.articleNumber;
@@ -1898,13 +1940,23 @@ export default function CaseDetailsPage() {
                 </button>
 
                 {caseMemo && (
-                  <button
-                    style={styles.copyButton}
-                    onClick={copyCaseMemoText}
-                    disabled={saving === 'case-memo'}
-                  >
-                    {memoCopied ? 'تم النسخ ✅' : 'نسخ المذكرة'}
-                  </button>
+                  <>
+                    <button
+                      style={styles.copyButton}
+                      onClick={copyCaseMemoText}
+                      disabled={saving === 'case-memo' || saving === 'memo-word'}
+                    >
+                      {memoCopied ? 'تم النسخ ✅' : 'نسخ المذكرة'}
+                    </button>
+
+                    <button
+                      style={styles.wordButton}
+                      onClick={downloadCaseMemoWord}
+                      disabled={saving === 'case-memo' || saving === 'memo-word'}
+                    >
+                      {saving === 'memo-word' ? 'جاري تجهيز Word...' : 'تحميل Word'}
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -1995,14 +2047,26 @@ export default function CaseDetailsPage() {
                   </div>
 
                   <div style={styles.memoHeaderActions}>
-                    <button style={styles.copyButton} onClick={copyCaseMemoText}>
+                    <button
+                      style={styles.copyButton}
+                      onClick={copyCaseMemoText}
+                      disabled={saving === 'memo-word'}
+                    >
                       {memoCopied ? 'تم النسخ ✅' : 'نسخ كامل المذكرة'}
+                    </button>
+
+                    <button
+                      style={styles.wordButton}
+                      onClick={downloadCaseMemoWord}
+                      disabled={saving === 'case-memo' || saving === 'memo-word'}
+                    >
+                      {saving === 'memo-word' ? 'جاري تجهيز Word...' : 'تحميل Word'}
                     </button>
 
                     <button
                       style={styles.secondaryButton}
                       onClick={generateCaseMemo}
-                      disabled={saving === 'case-memo'}
+                      disabled={saving === 'case-memo' || saving === 'memo-word'}
                     >
                       {saving === 'case-memo' ? 'جاري التحديث...' : 'تحديث النسخة'}
                     </button>
@@ -2779,6 +2843,17 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 700,
   },
 
+  wordButton: {
+    background: 'rgba(34, 197, 94, 0.14)',
+    color: '#bbf7d0',
+    border: '1px solid rgba(74, 222, 128, 0.28)',
+    borderRadius: '12px',
+    padding: '10px 14px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    fontWeight: 800,
+  },
   secondaryButton: {
     background: '#0f172a',
     color: '#cbd5e1',
