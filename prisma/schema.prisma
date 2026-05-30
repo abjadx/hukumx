@@ -69,3 +69,188 @@ model LegalArticle {
   @@index([articleNumber])
   @@index([reviewStatus])
 }
+
+// ===============================
+// Hukumx Cases System
+// ===============================
+
+enum LegalCaseStatus {
+  DRAFT
+  ACTIVE
+  UNDER_REVIEW
+  CLOSED
+  ARCHIVED
+}
+
+enum LegalCaseType {
+  CIVIL
+  CRIMINAL
+  COMMERCIAL
+  LABOR
+  FAMILY
+  ADMINISTRATIVE
+  CONTRACT
+  OTHER
+}
+
+enum CaseDocumentType {
+  CLAIM
+  CONTRACT
+  EVIDENCE
+  JUDGMENT
+  NOTICE
+  POWER_OF_ATTORNEY
+  EXPERT_REPORT
+  OTHER
+}
+
+enum CaseEventType {
+  HEARING
+  DEADLINE
+  APPEAL_DEADLINE
+  FILING_DATE
+  NOTICE_DATE
+  JUDGMENT_DATE
+  OTHER
+}
+
+model LegalCase {
+  id       String          @id @default(cuid())
+  title    String
+  country  String          @default("JO")
+  caseType LegalCaseType   @default(OTHER)
+  status   LegalCaseStatus @default(DRAFT)
+
+  clientName   String?
+  opponentName String?
+  courtName    String?
+  caseNumber   String?
+
+  description String?
+  aiSummary   String?
+  riskLevel   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents       CaseDocument[]
+  events          CaseEvent[]
+  analyses        CaseAnalysis[]
+  recommendations CaseRecommendation[]
+  memos           CaseMemo[]
+
+  @@index([country])
+  @@index([caseType])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CaseDocument {
+  id     String    @id @default(cuid())
+  caseId String
+  case   LegalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  fileName String
+  fileUrl  String?
+  mimeType String?
+  size     Int?
+
+  documentType CaseDocumentType @default(OTHER)
+
+  rawText       String?
+  cleanedText   String?
+  aiSummary     String?
+  extractedData Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([documentType])
+}
+
+model CaseEvent {
+  id     String    @id @default(cuid())
+  caseId String
+  case   LegalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  eventType   CaseEventType @default(OTHER)
+
+  eventDate  DateTime?
+  isCritical Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([eventType])
+  @@index([eventDate])
+  @@index([isCritical])
+}
+
+model CaseAnalysis {
+  id     String    @id @default(cuid())
+  caseId String
+  case   LegalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  summary         String?
+  facts           Json?
+  legalIssues     Json?
+  relatedArticles Json?
+  strengths       Json?
+  weaknesses      Json?
+  nextSteps       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+}
+
+model CaseRecommendation {
+  id     String    @id @default(cuid())
+  caseId String
+  case   LegalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  title              String
+  description        String
+  priority           String?
+  recommendationType String?
+
+  isDone Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([isDone])
+}
+
+model CaseMemo {
+  id     String    @id @default(cuid())
+  caseId String
+  case   LegalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  title            String
+  memoText         String
+  executiveSummary String?
+
+  keyFacts           Json?
+  legalIssues        Json?
+  appliedArticles    Json?
+  recommendations    Json?
+  missingInformation Json?
+
+  riskLevel      String?
+  disclaimer     String?
+  sourceSnapshot Json?
+  generatedBy    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([createdAt])
+}
