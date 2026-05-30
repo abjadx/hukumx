@@ -31,6 +31,13 @@ type ParsedLegislation = {
   articles: ParsedArticle[];
 };
 
+type ArticleHeadingMatch = {
+  articleNumber: number;
+  start: number;
+  end: number;
+  line: string;
+};
+
 const LEGISLATION_TYPES: Record<LegislationType, string> = {
   CONSTITUTION: 'دستور',
   LAW: 'قانون',
@@ -45,13 +52,6 @@ function getSingleFormValue(formData: FormData, key: string) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function parsePositiveInteger(value: string) {
-  const normalized = convertArabicDigits(value).replace(/[^0-9]/g, '').trim();
-  const parsed = Number(normalized);
-
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
-}
-
 function normalizeLegislationType(value: string): LegislationType {
   if (value === 'CONSTITUTION') return 'CONSTITUTION';
   if (value === 'LAW') return 'LAW';
@@ -61,8 +61,26 @@ function normalizeLegislationType(value: string): LegislationType {
   return 'OTHER';
 }
 
+function convertArabicDigits(value: string) {
+  const map: Record<string, string> = {
+    '٠': '0',
+    '١': '1',
+    '٢': '2',
+    '٣': '3',
+    '٤': '4',
+    '٥': '5',
+    '٦': '6',
+    '٧': '7',
+    '٨': '8',
+    '٩': '9',
+  };
+
+  return value.replace(/[٠-٩]/g, (digit) => map[digit] || digit);
+}
+
 function cleanText(value: string) {
   return value
+    .normalize('NFKC')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
@@ -101,24 +119,16 @@ function getArticleTextPreview(text: string) {
   return cleanText(text).slice(0, 220);
 }
 
-function convertArabicDigits(value: string) {
-  const map: Record<string, string> = {
-    '٠': '0',
-    '١': '1',
-    '٢': '2',
-    '٣': '3',
-    '٤': '4',
-    '٥': '5',
-    '٦': '6',
-    '٧': '7',
-    '٨': '8',
-    '٩': '9',
-  };
-
-  return value.replace(/[٠-٩]/g, (digit) => map[digit] || digit);
+function parseExpectedArticleCount(value: string) {
+  const normalized = Number(convertArabicDigits(value).replace(/[^\d]/g, ''));
+  if (!Number.isFinite(normalized) || normalized <= 0) return 0;
+  return normalized;
 }
 
 function normalizeArticleNumber(value: string, fallbackIndex: number) {
+  const numbers = convertArabicDigits(value).match(/[0-9]{1,4}/g);
+  const lastNumber = numbers?.[numbers.length - 1];
+
   const cleaned = convertArabicDigits(value)
     .replace(/^المادة\s*/u, '')
     .replace(/^مادة\s*/u, '')
@@ -126,54 +136,34 @@ function normalizeArticleNumber(value: string, fallbackIndex: number) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  return cleaned || String(fallbackIndex + 1);
+  return lastNumber || cleaned || String(fallbackIndex + 1);
 }
 
-function getArticleSortKey(articleNumber: string, fallbackIndex: number) {
-  const normalized = convertArabicDigits(articleNumber || '')
-    .replace(/^المادة\s*/u, '')
-    .replace(/^مادة\s*/u, '')
-    .replace(/[():：]/g, '')
-    .trim();
+function getArticleSortNumber(value: string) {
+  const numbers = convertArabicDigits(value).match(/[0-9]{1,4}/g);
+  if (!numbers?.length) return Number.POSITIVE_INFINITY;
 
-  const firstNumber = normalized.match(/\d+/)?.[0];
-
-  if (firstNumber) {
-    return {
-      type: 0,
-      number: Number(firstNumber),
-      text: normalized,
-      fallbackIndex,
-    };
-  }
-
-  return {
-    type: 1,
-    number: Number.MAX_SAFE_INTEGER,
-    text: normalized || articleNumber || '',
-    fallbackIndex,
-  };
+  const parsed = Number(numbers[numbers.length - 1]);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
 function sortParsedArticlesByNumber(articles: ParsedArticle[]) {
   return [...articles].sort((a, b) => {
-    const keyA = getArticleSortKey(a.articleNumber, 0);
-    const keyB = getArticleSortKey(b.articleNumber, 0);
+    const numberA = getArticleSortNumber(a.articleNumber);
+    const numberB = getArticleSortNumber(b.articleNumber);
 
-    if (keyA.type !== keyB.type) return keyA.type - keyB.type;
-    if (keyA.number !== keyB.number) return keyA.number - keyB.number;
+    if (Number.isFinite(numberA) && Number.isFinite(numberB) && numberA !== numberB) {
+      return numberA - numberB;
+    }
 
-    const textCompare = keyA.text.localeCompare(keyB.text, 'ar', { numeric: true });
-    if (textCompare !== 0) return textCompare;
-
-    return 0;
+    return String(a.articleNumber).localeCompare(String(b.articleNumber), 'ar');
   });
 }
 
 function makeUniqueArticleNumbers(articles: ParsedArticle[]) {
   const used = new Map<string, number>();
 
-  return articles.map((article, index) => {
+  return sortParsedArticlesByNumber(articles).map((article, index) => {
     const baseNumber = normalizeArticleNumber(article.articleNumber, index);
     const count = used.get(baseNumber) || 0;
     used.set(baseNumber, count + 1);
@@ -185,37 +175,215 @@ function makeUniqueArticleNumbers(articles: ParsedArticle[]) {
   });
 }
 
+function normalizeTextForArticleDetection(value: string) {
+  let text = cleanText(value);
+
+  // بعض ملفات PDF الأردنية تعكس ترتيب العنوان فيظهر "1المادة" أو "-1المادة".
+  // نحوله إلى صيغة موحدة: "المادة 1" حتى لا يفوت النظام أي مادة.
+  text = text
+    .replace(/(^|\n)\s*([0-9٠-٩]{1,4})\s*المادة/g, '$1\nالمادة $2')
+    .replace(/(^|\n)\s*[-–—:：]\s*([0-9٠-٩]{1,4})\s*المادة/g, '$1\nالمادة $2')
+    .replace(/المادة\s*[-:：–—]*\s*([0-9٠-٩]{1,4})/g, '\nالمادة $1')
+    .replace(/\n{3,}/g, '\n\n');
+
+  return cleanText(text);
+}
+
+function isNoiseLine(line: string) {
+  const value = line.trim();
+
+  if (!value) return true;
+  if (/^ارتباطات المادة$/u.test(value)) return true;
+  if (/^تعديلات المادة$/u.test(value)) return true;
+  if (/^[0-9٠-٩]+\s*تعديلات المادة$/u.test(value)) return true;
+  if (/^التشريعات المرتبطة\s*[0-9٠-٩]*$/u.test(value)) return true;
+  if (/^تعديلات$/u.test(value)) return true;
+  if (/^روابط ذات صلة$/u.test(value)) return true;
+  if (/^E$/u.test(value)) return true;
+  if (/^$/u.test(value)) return true;
+
+  return false;
+}
+
+function isFooterLine(line: string) {
+  const value = line.trim();
+
+  return (
+    value.includes('في سياق سعي ديوان التشريع') ||
+    value.includes('CopyRight') ||
+    value.includes('All Rights Reserved') ||
+    value.includes('اشترك في نشرة') ||
+    value.includes('اتصل بنا') ||
+    value.includes('خريطة الموقع') ||
+    value.includes('ادخل الاسم') ||
+    value.includes('ادخل البريد') ||
+    value.includes('ادخل الرسالة') ||
+    value.includes('رقم الفاكس') ||
+    value.includes('البريد الالكتروني') ||
+    value.includes('dewanlob')
+  );
+}
+
+function cleanArticleBlock(value: string) {
+  const lines = cleanText(value).split('\n');
+  const cleanedLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (isFooterLine(trimmed)) {
+      break;
+    }
+
+    if (isNoiseLine(trimmed)) {
+      continue;
+    }
+
+    cleanedLines.push(trimmed);
+  }
+
+  return cleanText(cleanedLines.join('\n'));
+}
+
+function findArticleHeadingMatches(text: string, maxArticleNumber = 9999): {
+  normalizedText: string;
+  matches: ArticleHeadingMatch[];
+} {
+  const normalizedText = normalizeTextForArticleDetection(text);
+  const rawLines = normalizedText.match(/[^\n]*(?:\n|$)/g) || [];
+
+  let offset = 0;
+  const matches: ArticleHeadingMatch[] = [];
+
+  for (const rawLine of rawLines) {
+    const lineStart = offset;
+    offset += rawLine.length;
+
+    const line = rawLine.trim();
+
+    if (!line || !line.includes('المادة')) continue;
+    if (line.includes('تعديلات المادة') || line.includes('ارتباطات المادة')) continue;
+
+    const digitMatches = line.match(/[0-9٠-٩]{1,4}/g) || [];
+    if (!digitMatches.length) continue;
+
+    // نأخذ آخر رقم في السطر لأن بعض ملفات PDF تظهر العنوان مثل: "المادة 3 123".
+    const lastNumber = Number(convertArabicDigits(digitMatches[digitMatches.length - 1]));
+    if (!Number.isFinite(lastNumber)) continue;
+    if (lastNumber < 1 || lastNumber > maxArticleNumber) continue;
+
+    matches.push({
+      articleNumber: lastNumber,
+      start: lineStart,
+      end: lineStart + rawLine.length,
+      line,
+    });
+  }
+
+  return { normalizedText, matches };
+}
+
+function splitArticlesByExpectedSequence(text: string, expectedArticleCount: number): {
+  articles: ParsedArticle[];
+  missingNumbers: number[];
+} {
+  if (!expectedArticleCount || expectedArticleCount <= 0) {
+    return { articles: [], missingNumbers: [] };
+  }
+
+  const { normalizedText, matches } = findArticleHeadingMatches(text, expectedArticleCount);
+  const selectedMatches: ArticleHeadingMatch[] = [];
+  const missingNumbers: number[] = [];
+  let lastStart = -1;
+
+  for (let articleNumber = 1; articleNumber <= expectedArticleCount; articleNumber += 1) {
+    const candidates = matches.filter(
+      (match) => match.articleNumber === articleNumber && match.start > lastStart
+    );
+
+    if (!candidates.length) {
+      missingNumbers.push(articleNumber);
+      continue;
+    }
+
+    const nextMatch =
+      articleNumber < expectedArticleCount
+        ? matches.find(
+            (match) => match.articleNumber === articleNumber + 1 && match.start > lastStart
+          )
+        : null;
+
+    const boundary = nextMatch?.start ?? normalizedText.length + 1;
+
+    // عند وجود عنوانين لنفس المادة بسبب عناوين الفصول أو الغلاف، نأخذ الأخير قبل المادة التالية.
+    const candidatesBeforeNextArticle = candidates.filter((match) => match.start < boundary);
+    const selected =
+      candidatesBeforeNextArticle[candidatesBeforeNextArticle.length - 1] ||
+      candidates[candidates.length - 1];
+
+    selectedMatches.push(selected);
+    lastStart = selected.start;
+  }
+
+  if (missingNumbers.length) {
+    return { articles: [], missingNumbers };
+  }
+
+  const articles = selectedMatches
+    .map((match, index) => {
+      const nextMatch = selectedMatches[index + 1];
+      const end = nextMatch?.start ?? normalizedText.length;
+      const articleText = cleanArticleBlock(normalizedText.slice(match.end, end));
+
+      return {
+        articleNumber: String(match.articleNumber),
+        articleText,
+        notes:
+          'تم استخراج هذه المادة بآلية تسلسل المواد حسب العدد الحقيقي المدخل، مع معالجة عناوين PDF المعكوسة والمتكررة.',
+      };
+    })
+    .filter((article) => article.articleText.trim().length > 10);
+
+  return {
+    articles: makeUniqueArticleNumbers(articles),
+    missingNumbers: [],
+  };
+}
+
 function splitArticlesHeuristically(text: string): ParsedArticle[] {
-  const cleaned = cleanText(text);
-
-  const articleStartRegex =
-    /(?:^|\n)\s*(?:المادة|مادة)\s*(?:رقم)?\s*\(?\s*([0-9٠-٩]+|[أإآء-ي]+)\s*\)?\s*[:：.\-–]?\s*/g;
-
-  const matches = Array.from(cleaned.matchAll(articleStartRegex));
+  const { normalizedText, matches } = findArticleHeadingMatches(text, 9999);
 
   if (matches.length > 0) {
-    const articles: ParsedArticle[] = [];
+    const selectedMatches: ArticleHeadingMatch[] = [];
 
-    for (let i = 0; i < matches.length; i += 1) {
-      const match = matches[i];
-      const nextMatch = matches[i + 1];
-      const start = match.index || 0;
-      const end = nextMatch?.index ?? cleaned.length;
-      const block = cleaned.slice(start, end).trim();
-      const articleNumber = normalizeArticleNumber(match[1] || String(i + 1), i);
+    for (const match of matches) {
+      const last = selectedMatches[selectedMatches.length - 1];
 
-      if (block.length > 20) {
-        articles.push({
-          articleNumber,
-          articleText: block,
-          notes: 'تم تقسيم المادة آليًا من النص عند تعذر أو عدم كفاية تقسيم الذكاء الصناعي.',
-        });
+      if (last?.articleNumber === match.articleNumber) {
+        selectedMatches[selectedMatches.length - 1] = match;
+      } else {
+        selectedMatches.push(match);
       }
     }
 
-    return makeUniqueArticleNumbers(sortParsedArticlesByNumber(articles));
+    const articles = selectedMatches
+      .map((match, index) => {
+        const nextMatch = selectedMatches[index + 1];
+        const end = nextMatch?.start ?? normalizedText.length;
+        const articleText = cleanArticleBlock(normalizedText.slice(match.end, end));
+
+        return {
+          articleNumber: String(match.articleNumber),
+          articleText,
+          notes: 'تم تقسيم المادة آليًا من النص عند تعذر أو عدم كفاية تقسيم الذكاء الصناعي.',
+        };
+      })
+      .filter((article) => article.articleText.trim().length > 20);
+
+    return makeUniqueArticleNumbers(articles);
   }
 
+  const cleaned = cleanText(text);
   const numberedLineRegex = /(?:^|\n)\s*([0-9٠-٩]{1,4})\s*[\).\-/]\s+/g;
   const numberedMatches = Array.from(cleaned.matchAll(numberedLineRegex));
 
@@ -227,7 +395,7 @@ function splitArticlesHeuristically(text: string): ParsedArticle[] {
       const nextMatch = numberedMatches[i + 1];
       const start = match.index || 0;
       const end = nextMatch?.index ?? cleaned.length;
-      const block = cleaned.slice(start, end).trim();
+      const block = cleanArticleBlock(cleaned.slice(start, end).trim());
 
       if (block.length > 20) {
         articles.push({
@@ -238,7 +406,7 @@ function splitArticlesHeuristically(text: string): ParsedArticle[] {
       }
     }
 
-    return makeUniqueArticleNumbers(sortParsedArticlesByNumber(articles));
+    return makeUniqueArticleNumbers(articles);
   }
 
   if (cleaned.length > 20) {
@@ -311,7 +479,9 @@ function normalizeParsedLegislation(
                 ? normalizeArticleNumber(article.articleNumber, index)
                 : String(index + 1),
             articleText:
-              typeof article.articleText === 'string' ? cleanText(article.articleText) : '',
+              typeof article.articleText === 'string'
+                ? cleanArticleBlock(article.articleText)
+                : '',
             notes: typeof article.notes === 'string' ? article.notes : '',
           };
         })
@@ -327,7 +497,7 @@ function normalizeParsedLegislation(
       typeof parsed.sourceType === 'string' && parsed.sourceType.trim()
         ? parsed.sourceType.trim()
         : fallbackType,
-    articles: makeUniqueArticleNumbers(sortParsedArticlesByNumber(articles)),
+    articles: makeUniqueArticleNumbers(articles),
   };
 }
 
@@ -353,7 +523,7 @@ async function parseLegislationWithAI(params: {
 مهمتك:
 - قراءة نص تشريع عربي مستخرج من PDF أو TXT.
 - تمييز المواد القانونية وفصلها إلى مواد مستقلة.
-- ترتيب المواد تصاعديًا حسب رقم المادة: 1 ثم 2 ثم 3 وهكذا، حتى لو ظهر النص المستخرج بترتيب مختلط.
+- الحفاظ على ترتيب المواد تصاعديًا حسب رقم المادة.
 - الحفاظ على نص المادة كاملًا قدر الإمكان.
 - تنظيف أخطاء التنسيق البسيطة فقط مثل فواصل الأسطر غير المنطقية والمسافات الزائدة.
 - عدم تلخيص المواد.
@@ -437,7 +607,7 @@ type PdfParseFunction = (buffer: Buffer) => Promise<{ text?: string }>;
 async function parsePdfBuffer(buffer: Buffer) {
   // نستدعي ملف المكتبة الداخلي بدل import من pdf-parse مباشرة.
   // الاستيراد المباشر من pdf-parse يشغّل كود debug أثناء next build
-  // ويحاول قراءة test/data/05-versions-space.pdf، وهذا سبب خطأ ENOENT.
+  // ويحاول قراءة test/data/05-versions-space.pdf.
   const requireFunc = eval('require') as NodeRequire;
   const pdfParse = requireFunc('pdf-parse/lib/pdf-parse.js') as PdfParseFunction;
   const parsed = await pdfParse(buffer);
@@ -491,7 +661,7 @@ export async function POST(req: NextRequest) {
       getSingleFormValue(formData, 'legislationType')
     );
     const replaceExisting = getSingleFormValue(formData, 'replaceExisting') === 'true';
-    const expectedArticleCount = parsePositiveInteger(
+    const expectedArticleCount = parseExpectedArticleCount(
       getSingleFormValue(formData, 'expectedArticleCount')
     );
 
@@ -510,17 +680,6 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           error: 'يرجى إدخال عنوان التشريع.',
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!expectedArticleCount) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            'يرجى إدخال عدد المواد الحقيقي قبل رفع التشريع. هذا الحقل يحمي النظام من إدخال تشريع ناقص.',
         },
         { status: 400 }
       );
@@ -575,33 +734,57 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const fallbackArticles = splitArticlesHeuristically(extractedText);
+    const expectedSplitResult = expectedArticleCount
+      ? splitArticlesByExpectedSequence(extractedText, expectedArticleCount)
+      : { articles: [] as ParsedArticle[], missingNumbers: [] as number[] };
 
-    const aiParsed = await parseLegislationWithAI({
-      titleAr,
-      legislationType,
-      countryNameAr,
-      text: extractedText,
-    });
+    if (expectedArticleCount > 0 && expectedSplitResult.articles.length !== expectedArticleCount) {
+      const missingText = expectedSplitResult.missingNumbers.length
+        ? ` المواد التي لم يتم العثور عليها: ${expectedSplitResult.missingNumbers
+            .slice(0, 30)
+            .join(', ')}${expectedSplitResult.missingNumbers.length > 30 ? '...' : ''}`
+        : '';
 
-    const useAiParser = Boolean(
-      aiParsed &&
-        aiParsed.articles.length > 0 &&
-        aiParsed.articles.length >= Math.max(1, Math.ceil(fallbackArticles.length * 0.85))
-    );
+      return NextResponse.json(
+        {
+          success: false,
+          error: `عدد المواد المستخرجة لا يطابق العدد الحقيقي الذي أدخلته. العدد الحقيقي: ${expectedArticleCount}، والمواد المستخرجة: ${expectedSplitResult.articles.length}. لم يتم إدخال التشريع إلى قاعدة البيانات.${missingText}`,
+          data: {
+            expectedArticleCount,
+            extractedArticlesCount: expectedSplitResult.articles.length,
+            missingNumbers: expectedSplitResult.missingNumbers,
+            extractedTextLength: extractedText.length,
+          },
+        },
+        { status: 400 }
+      );
+    }
 
-    const parsedLegislation = useAiParser && aiParsed
-      ? {
-          ...aiParsed,
-          articles: sortParsedArticlesByNumber(aiParsed.articles),
-        }
-      : {
-          sourceTitle: titleAr,
-          sourceType: legislationType,
-          articles: fallbackArticles,
-        };
+    const fallbackArticles = expectedSplitResult.articles.length
+      ? expectedSplitResult.articles
+      : splitArticlesHeuristically(extractedText);
 
-    if (!parsedLegislation.articles.length) {
+    const aiParsed = expectedArticleCount
+      ? null
+      : await parseLegislationWithAI({
+          titleAr,
+          legislationType,
+          countryNameAr,
+          text: extractedText,
+        });
+
+    const parsedLegislation =
+      aiParsed && aiParsed.articles.length > fallbackArticles.length
+        ? aiParsed
+        : {
+            sourceTitle: titleAr,
+            sourceType: legislationType,
+            articles: fallbackArticles,
+          };
+
+    const finalArticles = makeUniqueArticleNumbers(parsedLegislation.articles);
+
+    if (!finalArticles.length) {
       return NextResponse.json(
         {
           success: false,
@@ -611,29 +794,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sortedParsedArticles = makeUniqueArticleNumbers(
-      sortParsedArticlesByNumber(parsedLegislation.articles)
-    );
-
-    if (sortedParsedArticles.length !== expectedArticleCount) {
+    if (expectedArticleCount > 0 && finalArticles.length !== expectedArticleCount) {
       return NextResponse.json(
         {
           success: false,
-          error: `عدد المواد المستخرجة لا يطابق العدد الحقيقي الذي أدخلته. العدد الحقيقي: ${expectedArticleCount}، والمواد المستخرجة: ${sortedParsedArticles.length}. لم يتم إدخال التشريع إلى قاعدة البيانات. غالبًا الملف PDF غير نصي بالكامل أو أن الاستخراج فقد صفحات/مواد.`,
+          error: `عدد المواد المستخرجة لا يطابق العدد الحقيقي الذي أدخلته. العدد الحقيقي: ${expectedArticleCount}، والمواد المستخرجة: ${finalArticles.length}. لم يتم إدخال التشريع إلى قاعدة البيانات.`,
           data: {
             expectedArticleCount,
-            extractedArticlesCount: sortedParsedArticles.length,
-            parsingMode:
-              aiParsed && aiParsed.articles.length >= Math.max(1, fallbackArticles.length)
-                ? 'AI_ORDERED'
-                : 'AUTO_SPLIT_ORDERED',
-            preview: sortedParsedArticles.slice(0, 8).map((article) => ({
-              articleNumber: article.articleNumber,
-              text: getArticleTextPreview(article.articleText),
-            })),
+            extractedArticlesCount: finalArticles.length,
+            extractedTextLength: extractedText.length,
           },
         },
-        { status: 422 }
+        { status: 400 }
       );
     }
 
@@ -682,7 +854,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const articlesToInsert = sortedParsedArticles
+    const articlesToInsert = finalArticles
       .map((article) => ({
         legalSourceId: legalSource.id,
         articleNumber: article.articleNumber,
@@ -693,15 +865,20 @@ export async function POST(req: NextRequest) {
         reviewNotes: [
           `تم إدخال هذه المادة من ملف ${fileValue.name}.`,
           `نوع التشريع: ${LEGISLATION_TYPES[legislationType]}.`,
-          useAiParser
-            ? 'تم تقسيم وتنظيف النص مبدئيًا بالذكاء الصناعي وترتيب المواد تصاعديًا حسب رقم المادة. يحتاج اعتمادًا بشريًا.'
-            : 'تم تقسيم النص آليًا وترتيب المواد تصاعديًا حسب رقم المادة بعد تعذر أو عدم كفاية نتيجة AI. يحتاج مراجعة بشرية.',
+          expectedArticleCount
+            ? `تم التحقق من العدد الحقيقي للمواد: ${expectedArticleCount}.`
+            : '',
+          expectedArticleCount
+            ? 'تم استخراج المواد بآلية تسلسل رقمية صارمة اعتمادًا على العدد الحقيقي المدخل.'
+            : aiParsed && aiParsed.articles.length > fallbackArticles.length
+              ? 'تم تقسيم وتنظيف النص مبدئيًا بالذكاء الصناعي ويحتاج اعتمادًا بشريًا.'
+              : 'تم تقسيم النص آليًا ويحتاج مراجعة بشرية.',
           article.notes ? `ملاحظة: ${article.notes}` : '',
         ]
           .filter(Boolean)
           .join('\n'),
       }))
-      .filter((article) => article.articleText.trim().length > 20);
+      .filter((article) => article.articleText.trim().length > 10);
 
     await prisma.legalArticle.createMany({
       data: articlesToInsert,
@@ -716,10 +893,14 @@ export async function POST(req: NextRequest) {
         legislationType,
         legislationTypeLabel: LEGISLATION_TYPES[legislationType],
         fileName: fileValue.name,
+        expectedArticleCount: expectedArticleCount || null,
         extractedTextLength: extractedText.length,
-        expectedArticleCount,
         insertedArticlesCount: articlesToInsert.length,
-        parsingMode: useAiParser ? 'AI_ORDERED' : 'AUTO_SPLIT_ORDERED',
+        parsingMode: expectedArticleCount
+          ? 'SEQUENCE_EXPECTED_COUNT'
+          : aiParsed && aiParsed.articles.length > fallbackArticles.length
+            ? 'AI_ORDERED'
+            : 'AUTO_SPLIT_ORDERED',
         reviewStatus: 'needs_review',
         preview: articlesToInsert.slice(0, 5).map((article) => ({
           articleNumber: article.articleNumber,
