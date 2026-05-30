@@ -86,3 +86,74 @@ export async function GET(
     );
   }
 }
+
+
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: caseId } = await context.params;
+    const { searchParams } = new URL(req.url);
+    const memoId = searchParams.get('memoId')?.trim();
+
+    if (!memoId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'يرجى تحديد نسخة المذكرة المراد حذفها.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const deleted = await prisma.caseMemo.deleteMany({
+      where: {
+        id: memoId,
+        caseId,
+      },
+    });
+
+    if (deleted.count === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'نسخة المذكرة غير موجودة أو لا تتبع هذه القضية.',
+        },
+        { status: 404 }
+      );
+    }
+
+    const remainingMemos = await prisma.caseMemo.findMany({
+      where: { caseId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const normalizedMemos = remainingMemos.map(normalizeStoredMemo);
+    const latestMemo = normalizedMemos[0] || null;
+
+    return NextResponse.json({
+      success: true,
+      deletedMemoId: memoId,
+      data: {
+        latestMemo,
+        memos: normalizedMemos,
+        total: normalizedMemos.length,
+      },
+      latestMemo,
+      memo: latestMemo,
+      memos: normalizedMemos,
+    });
+  } catch (error) {
+    console.error('Hukumx delete case memo version error:', error);
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'حدث خطأ أثناء حذف نسخة المذكرة القانونية.',
+      },
+      { status: 500 }
+    );
+  }
+}

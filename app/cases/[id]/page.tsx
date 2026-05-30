@@ -1058,6 +1058,65 @@ export default function CaseDetailsPage() {
     setSuccessMessage('');
   }
 
+  async function deleteCaseMemoVersion(memo: CaseLegalMemo) {
+    if (!memo.id) {
+      setMemoError('لا يمكن حذف هذه النسخة لعدم وجود معرّف محفوظ لها.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'هل أنت متأكد من حذف نسخة هذه المذكرة؟ لا يمكن التراجع عن هذه العملية.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSaving(`delete-memo-${memo.id}`);
+      setMemoError('');
+      setSuccessMessage('');
+      setMemoCopied(false);
+
+      const res = await fetch(
+        `/api/cases/${caseId}/memo/versions?memoId=${encodeURIComponent(memo.id)}`,
+        {
+          method: 'DELETE',
+          cache: 'no-store',
+        }
+      );
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.error || 'فشل في حذف نسخة المذكرة القانونية');
+      }
+
+      const memos: CaseLegalMemo[] = Array.isArray(json?.data?.memos)
+        ? json.data.memos
+        : Array.isArray(json?.memos)
+          ? json.memos
+          : [];
+
+      const latestMemo: CaseLegalMemo | null =
+        json?.data?.latestMemo || json?.latestMemo || memos[0] || null;
+
+      setCaseMemoVersions(memos);
+      setCaseMemo((currentMemo) => {
+        if (!currentMemo?.id || currentMemo.id === memo.id) {
+          return latestMemo;
+        }
+
+        const stillExists = memos.some((item) => item.id === currentMemo.id);
+        return stillExists ? currentMemo : latestMemo;
+      });
+
+      setSuccessMessage('تم حذف نسخة المذكرة القانونية بنجاح');
+    } catch (err: any) {
+      setMemoError(err.message || 'تعذر حذف نسخة المذكرة القانونية');
+    } finally {
+      setSaving('');
+    }
+  }
+
   async function showArticleText(article: RelatedArticle) {
     setArticleCopied(false);
   const articleIdentifier = article.articleId || article.articleNumber;
@@ -2171,23 +2230,46 @@ export default function CaseDetailsPage() {
                           caseMemo?.id === memoVersion.id;
 
                         return (
-                          <button
+                          <div
                             key={memoVersion.id || `${memoVersion.createdAt}-${index}`}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
                             style={{
                               ...styles.memoVersionButton,
                               ...(isSelected ? styles.activeMemoVersionButton : {}),
                             }}
                             onClick={() => selectCaseMemoVersion(memoVersion)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                selectCaseMemoVersion(memoVersion);
+                              }
+                            }}
                           >
                             <div style={styles.memoVersionTopRow}>
                               <strong style={styles.memoVersionTitle}>
                                 {index === 0 ? 'النسخة الأحدث' : `نسخة رقم ${caseMemoVersions.length - index}`}
                               </strong>
 
-                              {isSelected && (
-                                <span style={styles.memoVersionSelectedBadge}>معروضة</span>
-                              )}
+                              <div style={styles.memoVersionActions}>
+                                {isSelected && (
+                                  <span style={styles.memoVersionSelectedBadge}>معروضة</span>
+                                )}
+
+                                {memoVersion.id && (
+                                  <button
+                                    type="button"
+                                    style={styles.memoVersionDeleteButton}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      deleteCaseMemoVersion(memoVersion);
+                                    }}
+                                    disabled={saving === `delete-memo-${memoVersion.id}`}
+                                  >
+                                    {saving === `delete-memo-${memoVersion.id}` ? 'جاري الحذف...' : 'حذف'}
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             <span style={styles.memoVersionMeta}>
@@ -2200,7 +2282,7 @@ export default function CaseDetailsPage() {
                               الخطورة: {getMemoRiskLabel(memoVersion.riskLevel)} · المواد:{' '}
                               {memoVersion.appliedArticles?.length || 0}
                             </span>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -3019,6 +3101,23 @@ const styles: Record<string, CSSProperties> = {
   memoVersionTitle: {
     color: '#ffffff',
     fontSize: '14px',
+  },
+  memoVersionActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexShrink: 0,
+  },
+  memoVersionDeleteButton: {
+    background: 'rgba(239, 68, 68, 0.12)',
+    color: '#fecaca',
+    border: '1px solid rgba(248, 113, 113, 0.28)',
+    borderRadius: '10px',
+    padding: '6px 9px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    fontWeight: 800,
   },
   memoVersionSelectedBadge: {
     background: 'rgba(34, 197, 94, 0.14)',
