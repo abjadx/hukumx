@@ -13,6 +13,7 @@ type ImportResult = {
   legislationTypeLabel: string;
   fileName: string;
   extractedTextLength: number;
+  expectedArticleCount?: number;
   insertedArticlesCount: number;
   parsingMode: 'AI' | 'AUTO_SPLIT' | string;
   reviewStatus: string;
@@ -38,6 +39,24 @@ const legislationTypeOptions = [
   { value: 'DECISION', label: 'قرار' },
   { value: 'OTHER', label: 'أخرى' },
 ];
+
+
+function convertArabicDigits(value: string) {
+  const map: Record<string, string> = {
+    '٠': '0',
+    '١': '1',
+    '٢': '2',
+    '٣': '3',
+    '٤': '4',
+    '٥': '5',
+    '٦': '6',
+    '٧': '7',
+    '٨': '8',
+    '٩': '9',
+  };
+
+  return value.replace(/[٠-٩]/g, (digit) => map[digit] || digit);
+}
 
 function normalizeSlug(value: string) {
   return value
@@ -75,14 +94,22 @@ export default function ImportLegalSourcePage() {
 function ImportLegalSourcePageContent() {
   const searchParams = useSearchParams();
   const keyFromUrl = searchParams.get('key') || '';
+  const countryFromUrl = searchParams.get('countryCode') || 'JO';
+  const titleArFromUrl = searchParams.get('titleAr') || '';
+  const titleEnFromUrl = searchParams.get('titleEn') || '';
+  const legislationTypeFromUrl = searchParams.get('legislationType') || 'LAW';
+  const slugFromUrl = searchParams.get('slug') || '';
+  const expectedArticleCountFromUrl = searchParams.get('expectedArticleCount') || '';
+  const replaceExistingFromUrl = searchParams.get('replaceExisting') !== 'false';
 
   const [adminKey, setAdminKey] = useState(keyFromUrl);
-  const [countryCode, setCountryCode] = useState('JO');
-  const [titleAr, setTitleAr] = useState('');
-  const [titleEn, setTitleEn] = useState('');
-  const [legislationType, setLegislationType] = useState('LAW');
-  const [slug, setSlug] = useState('');
-  const [replaceExisting, setReplaceExisting] = useState(true);
+  const [countryCode, setCountryCode] = useState(countryFromUrl);
+  const [titleAr, setTitleAr] = useState(titleArFromUrl);
+  const [titleEn, setTitleEn] = useState(titleEnFromUrl);
+  const [legislationType, setLegislationType] = useState(legislationTypeFromUrl);
+  const [slug, setSlug] = useState(slugFromUrl);
+  const [expectedArticleCount, setExpectedArticleCount] = useState(expectedArticleCountFromUrl);
+  const [replaceExisting, setReplaceExisting] = useState(replaceExistingFromUrl);
   const [file, setFile] = useState<File | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -115,6 +142,14 @@ function ImportLegalSourcePageContent() {
         throw new Error('يرجى إدخال عنوان التشريع.');
       }
 
+      const expectedCountNumber = Number(
+        convertArabicDigits(expectedArticleCount).replace(/[^0-9]/g, '')
+      );
+
+      if (!Number.isInteger(expectedCountNumber) || expectedCountNumber <= 0) {
+        throw new Error('يرجى إدخال عدد المواد الحقيقي قبل رفع التشريع.');
+      }
+
       if (!file) {
         throw new Error('يرجى اختيار ملف PDF أو TXT.');
       }
@@ -129,6 +164,7 @@ function ImportLegalSourcePageContent() {
       formData.append('legislationType', legislationType);
       formData.append('slug', slug.trim() || suggestedSlug);
       formData.append('replaceExisting', replaceExisting ? 'true' : 'false');
+      formData.append('expectedArticleCount', expectedArticleCount.trim());
       formData.append('file', file);
 
       const res = await fetch('/api/admin/legal-sources/import', {
@@ -160,8 +196,8 @@ function ImportLegalSourcePageContent() {
             <p style={styles.label}>Hukumx Admin</p>
             <h1 style={styles.title}>إدخال تشريع من ملف PDF أو TXT</h1>
             <p style={styles.subtitle}>
-              ارفع ملف التشريع، وسيقوم النظام باستخراج النص وتقسيمه إلى مواد قانونية
-              وإدخاله داخل قاعدة البيانات بحالة تحتاج مراجعة قبل الاعتماد النهائي.
+              ارفع ملف التشريع، وأدخل عدد مواده الحقيقي أولًا. لن يتم حفظ التشريع إذا كان
+              عدد المواد المستخرجة لا يطابق العدد الحقيقي، حتى لا يدخل النظام تشريع ناقص.
             </p>
           </div>
 
@@ -181,7 +217,8 @@ function ImportLegalSourcePageContent() {
         <section style={styles.noticeBox}>
           <strong>مهم:</strong> هذه المرحلة تدعم PDF النصي و TXT فقط. ملفات PDF المصوّرة
           تحتاج OCR وسيتم التعامل معها في مرحلة لاحقة. جميع المواد تدخل بحالة
-          "تحتاج مراجعة" حتى يتم اعتمادها من شاشة المراجعة.
+          "تحتاج مراجعة" حتى يتم اعتمادها من شاشة المراجعة. يجب إدخال عدد المواد الحقيقي،
+          وسيتم إيقاف الإدخال بالكامل إذا ظهر نقص في عدد المواد المستخرجة.
         </section>
 
         {error && <div style={styles.errorBox}>{error}</div>}
@@ -199,13 +236,14 @@ function ImportLegalSourcePageContent() {
               </div>
 
               <div style={styles.bigNumberBox}>
-                <span>عدد المواد</span>
+                <span>عدد المواد المدخلة</span>
                 <strong>{result.insertedArticlesCount}</strong>
               </div>
             </div>
 
             <div style={styles.resultGrid}>
               <Info label="slug" value={result.sourceSlug} />
+              <Info label="العدد الحقيقي" value={String(result.expectedArticleCount || result.insertedArticlesCount)} />
               <Info label="حالة المواد" value="تحتاج مراجعة" />
               <Info
                 label="حجم النص المستخرج"
@@ -313,13 +351,17 @@ function ImportLegalSourcePageContent() {
             </label>
 
             <label style={styles.labelInput}>
-              slug اختياري
+              عدد المواد الحقيقي في التشريع
               <input
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
+                value={expectedArticleCount}
+                onChange={(e) => setExpectedArticleCount(e.target.value)}
                 style={styles.input}
-                placeholder={suggestedSlug || 'سيتم توليده تلقائيًا'}
+                inputMode="numeric"
+                placeholder="مثال: 131"
               />
+              <small style={styles.muted}>
+                هذا الحقل إلزامي. إذا استخرج النظام عددًا أقل أو أكثر، سيتم إيقاف الإدخال قبل حفظ أي مادة.
+              </small>
             </label>
 
             <label style={styles.fileBox}>
@@ -358,7 +400,8 @@ function ImportLegalSourcePageContent() {
               <li>استخراج النص من ملف PDF أو TXT.</li>
               <li>إرسال النص للذكاء الصناعي لتحديد المواد وفصلها.</li>
               <li>إنشاء مصدر قانوني جديد حسب النوع: قانون، نظام، تعليمات، قرار، دستور.</li>
-              <li>إدخال المواد في جدول المواد القانونية.</li>
+              <li>مطابقة عدد المواد المستخرجة مع عدد المواد الحقيقي الذي أدخلته.</li>
+              <li>إدخال المواد في جدول المواد القانونية فقط إذا كان العدد مطابقًا.</li>
               <li>وضع المواد بحالة تحتاج مراجعة قبل اعتمادها.</li>
               <li>إتاحتها لاحقًا للتحليل والمذكرات بعد الاعتماد.</li>
             </ol>

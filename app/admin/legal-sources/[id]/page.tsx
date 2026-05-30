@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { CSSProperties } from 'react';
 import { prisma } from '../../../lib/prisma';
+import DeleteLegalSourceButton from '../../../components/DeleteLegalSourceButton';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -214,6 +215,19 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '14px',
     fontWeight: 900,
   },
+  dangerButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '1px solid rgba(248, 113, 113, 0.42)',
+    background: 'rgba(127, 29, 29, 0.34)',
+    color: '#fecaca',
+    borderRadius: '14px',
+    padding: '11px 15px',
+    fontSize: '14px',
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
   statsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
@@ -394,6 +408,15 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
     .sort((a, b) => compareArticleNumbers(a.articleNumber, b.articleNumber));
 
   const keyQuery = `key=${encodeURIComponent(adminKey)}`;
+  const reimportHref =
+    `/admin/legal-sources/import?${keyQuery}` +
+    `&countryCode=${encodeURIComponent(source.country.code)}` +
+    `&titleAr=${encodeURIComponent(source.titleAr)}` +
+    `&titleEn=${encodeURIComponent(source.titleEn || '')}` +
+    `&legislationType=${encodeURIComponent(source.category || 'LAW')}` +
+    `&slug=${encodeURIComponent(source.slug)}` +
+    `&expectedArticleCount=${encodeURIComponent(String(allArticles.length || ''))}` +
+    '&replaceExisting=true';
 
   return (
     <main style={styles.page}>
@@ -402,6 +425,13 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
           <Link href={`/admin?${keyQuery}`} style={styles.button}>مركز الإدارة</Link>
           <Link href={`/admin/legal-sources?${keyQuery}`} style={styles.button}>كل التشريعات</Link>
           <Link href={`/admin/legal-sources/import?${keyQuery}`} style={styles.primaryButton}>إدخال تشريع جديد</Link>
+          <Link href={reimportHref} style={styles.primaryButton}>إعادة إدخال هذا التشريع</Link>
+          <DeleteLegalSourceButton
+            sourceId={source.id}
+            adminKey={adminKey}
+            sourceTitle={source.titleAr}
+            style={styles.dangerButton}
+          />
         </div>
 
         <section style={styles.hero}>

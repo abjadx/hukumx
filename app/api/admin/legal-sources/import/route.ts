@@ -45,6 +45,13 @@ function getSingleFormValue(formData: FormData, key: string) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function parsePositiveInteger(value: string) {
+  const normalized = convertArabicDigits(value).replace(/[^0-9]/g, '').trim();
+  const parsed = Number(normalized);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
 function normalizeLegislationType(value: string): LegislationType {
   if (value === 'CONSTITUTION') return 'CONSTITUTION';
   if (value === 'LAW') return 'LAW';
@@ -484,6 +491,9 @@ export async function POST(req: NextRequest) {
       getSingleFormValue(formData, 'legislationType')
     );
     const replaceExisting = getSingleFormValue(formData, 'replaceExisting') === 'true';
+    const expectedArticleCount = parsePositiveInteger(
+      getSingleFormValue(formData, 'expectedArticleCount')
+    );
 
     const slug =
       normalizeSlug(getSingleFormValue(formData, 'slug')) ||
@@ -500,6 +510,17 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           error: 'يرجى إدخال عنوان التشريع.',
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!expectedArticleCount) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'يرجى إدخال عدد المواد الحقيقي قبل رفع التشريع. هذا الحقل يحمي النظام من إدخال تشريع ناقص.',
         },
         { status: 400 }
       );
@@ -590,6 +611,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const sortedParsedArticles = makeUniqueArticleNumbers(
+      sortParsedArticlesByNumber(parsedLegislation.articles)
+    );
+
+    if (sortedParsedArticles.length !== expectedArticleCount) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `عدد المواد المستخرجة لا يطابق العدد الحقيقي الذي أدخلته. العدد الحقيقي: ${expectedArticleCount}، والمواد المستخرجة: ${sortedParsedArticles.length}. لم يتم إدخال التشريع إلى قاعدة البيانات. غالبًا الملف PDF غير نصي بالكامل أو أن الاستخراج فقد صفحات/مواد.`,
+          data: {
+            expectedArticleCount,
+            extractedArticlesCount: sortedParsedArticles.length,
+            parsingMode:
+              aiParsed && aiParsed.articles.length >= Math.max(1, fallbackArticles.length)
+                ? 'AI_ORDERED'
+                : 'AUTO_SPLIT_ORDERED',
+            preview: sortedParsedArticles.slice(0, 8).map((article) => ({
+              articleNumber: article.articleNumber,
+              text: getArticleTextPreview(article.articleText),
+            })),
+          },
+        },
+        { status: 422 }
+      );
+    }
+
     const country = await prisma.country.upsert({
       where: { code: countryCode },
       update: {
@@ -635,11 +682,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const orderedArticles = makeUniqueArticleNumbers(
-      sortParsedArticlesByNumber(parsedLegislation.articles)
-    );
-
-    const articlesToInsert = orderedArticles
+    const articlesToInsert = sortedParsedArticles
       .map((article) => ({
         legalSourceId: legalSource.id,
         articleNumber: article.articleNumber,
@@ -674,6 +717,7 @@ export async function POST(req: NextRequest) {
         legislationTypeLabel: LEGISLATION_TYPES[legislationType],
         fileName: fileValue.name,
         extractedTextLength: extractedText.length,
+        expectedArticleCount,
         insertedArticlesCount: articlesToInsert.length,
         parsingMode: useAiParser ? 'AI_ORDERED' : 'AUTO_SPLIT_ORDERED',
         reviewStatus: 'needs_review',
