@@ -337,14 +337,19 @@ function buildWordHtml(params: {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: caseId } = await context.params;
 
+    const memoId = req.nextUrl.searchParams.get('memoId')?.trim();
+
     const memo = await prisma.caseMemo.findFirst({
-      where: { caseId },
+      where: {
+        caseId,
+        ...(memoId ? { id: memoId } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         case: {
@@ -366,7 +371,9 @@ export async function GET(
       return NextResponse.json(
         {
           success: false,
-          error: 'لا توجد مذكرة قانونية محفوظة لهذه القضية لتحميلها كملف Word.',
+          error: memoId
+            ? 'نسخة المذكرة المطلوبة غير موجودة أو لا تتبع هذه القضية.'
+            : 'لا توجد مذكرة قانونية محفوظة لهذه القضية لتحميلها كملف Word.',
         },
         { status: 404 }
       );

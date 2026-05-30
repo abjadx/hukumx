@@ -379,6 +379,7 @@ export default function CaseDetailsPage() {
   const [selectedArticle, setSelectedArticle] = useState<ArticleDetails | null>(null);
   const [articleCopied, setArticleCopied] = useState(false);
   const [caseMemo, setCaseMemo] = useState<CaseLegalMemo | null>(null);
+  const [caseMemoVersions, setCaseMemoVersions] = useState<CaseLegalMemo[]>([]);
   const [memoLoading, setMemoLoading] = useState(false);
   const [memoError, setMemoError] = useState('');
   const [memoCopied, setMemoCopied] = useState(false);
@@ -439,7 +440,7 @@ export default function CaseDetailsPage() {
       setMemoLoading(true);
       setMemoError('');
 
-      const res = await fetch(`/api/cases/${caseId}/memo`, {
+      const res = await fetch(`/api/cases/${caseId}/memo/versions`, {
         method: 'GET',
         cache: 'no-store',
       });
@@ -454,18 +455,29 @@ export default function CaseDetailsPage() {
 
       if (res.status === 404) {
         setCaseMemo(null);
+        setCaseMemoVersions([]);
         return;
       }
 
       if (!res.ok || json?.success === false) {
-        throw new Error(json?.error || 'فشل في جلب آخر مذكرة محفوظة');
+        throw new Error(json?.error || 'فشل في جلب سجل المذكرات المحفوظة');
       }
 
-      const savedMemo = json?.data?.memo || json?.data || json?.memo || null;
-      setCaseMemo(savedMemo);
+      const memos: CaseLegalMemo[] = Array.isArray(json?.data?.memos)
+        ? json.data.memos
+        : Array.isArray(json?.memos)
+          ? json.memos
+          : [];
+
+      const latestMemo: CaseLegalMemo | null =
+        json?.data?.latestMemo || json?.latestMemo || json?.memo || memos[0] || null;
+
+      setCaseMemoVersions(memos);
+      setCaseMemo(latestMemo);
     } catch (err: any) {
       setCaseMemo(null);
-      setMemoError(err.message || 'تعذر جلب آخر مذكرة قانونية محفوظة');
+      setCaseMemoVersions([]);
+      setMemoError(err.message || 'تعذر جلب سجل المذكرات القانونية المحفوظة');
     } finally {
       setMemoLoading(false);
     }
@@ -959,6 +971,13 @@ export default function CaseDetailsPage() {
       }
 
       setCaseMemo(memo);
+      setCaseMemoVersions((previousVersions) => {
+        const remainingVersions = previousVersions.filter(
+          (item) => item.id && item.id !== memo.id
+        );
+
+        return [memo, ...remainingVersions];
+      });
       setActiveTab('memo');
       setSuccessMessage('تم توليد وحفظ المذكرة القانونية بنجاح');
     } catch (err: any) {
@@ -1001,7 +1020,9 @@ export default function CaseDetailsPage() {
       setMemoError('');
       setSuccessMessage('');
 
-      const res = await fetch(`/api/cases/${caseId}/memo/word`, {
+      const memoQuery = caseMemo.id ? `?memoId=${encodeURIComponent(caseMemo.id)}` : '';
+
+      const res = await fetch(`/api/cases/${caseId}/memo/word${memoQuery}`, {
         method: 'GET',
         cache: 'no-store',
       });
@@ -1016,7 +1037,7 @@ export default function CaseDetailsPage() {
       const link = document.createElement('a');
 
       link.href = url;
-      link.download = `hukumx-legal-memo-${caseId}.doc`;
+      link.download = `hukumx-legal-memo-${caseMemo.id || caseId}.doc`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1028,6 +1049,13 @@ export default function CaseDetailsPage() {
     } finally {
       setSaving('');
     }
+  }
+
+  function selectCaseMemoVersion(memo: CaseLegalMemo) {
+    setCaseMemo(memo);
+    setMemoCopied(false);
+    setMemoError('');
+    setSuccessMessage('');
   }
 
   async function showArticleText(article: RelatedArticle) {
@@ -1919,10 +1947,9 @@ export default function CaseDetailsPage() {
                   {caseMemo ? 'آخر مذكرة محفوظة لهذه القضية' : 'لا توجد مذكرة محفوظة بعد'}
                 </h2>
                 <p style={styles.aiActionText}>
-                  هذا التبويب يعرض آخر نسخة محفوظة من المذكرة القانونية. عند إعادة
-                  التوليد سيتم تحديث النسخة الحالية بناءً على بيانات القضية
-                  والمستندات والإجراءات والتحليلات والتوصيات والمواد القانونية
-                  المعتمدة.
+                  هذا التبويب يعرض أحدث نسخة محفوظة من المذكرة القانونية، مع إمكانية
+                  الرجوع إلى النسخ السابقة وتحميل أي نسخة كملف Word مستقل. عند
+                  إعادة التوليد سيتم حفظ نسخة جديدة في سجل المذكرات.
                 </p>
               </div>
 
@@ -1995,6 +2022,13 @@ export default function CaseDetailsPage() {
                 <span style={styles.memoStatusLabel}>المواد القانونية</span>
                 <strong style={styles.memoStatusValue}>
                   {caseMemo?.appliedArticles?.length || 0}
+                </strong>
+              </div>
+
+              <div style={styles.memoStatusCard}>
+                <span style={styles.memoStatusLabel}>عدد النسخ</span>
+                <strong style={styles.memoStatusValue}>
+                  {caseMemoVersions.length || 0}
                 </strong>
               </div>
             </div>
@@ -2113,6 +2147,66 @@ export default function CaseDetailsPage() {
               </div>
 
               <aside style={styles.card}>
+                <div style={styles.memoVersionsBox}>
+                  <div style={styles.memoVersionsHeader}>
+                    <div>
+                      <h2 style={styles.cardTitle}>سجل نسخ المذكرات</h2>
+                      <p style={styles.memoVersionsHint}>
+                        يتم حفظ نسخة جديدة عند كل إعادة توليد للمذكرة.
+                      </p>
+                    </div>
+
+                    <span style={styles.memoVersionCountBadge}>
+                      {caseMemoVersions.length} نسخة
+                    </span>
+                  </div>
+
+                  {caseMemoVersions.length === 0 ? (
+                    <p style={styles.muted}>لا توجد نسخ محفوظة بعد.</p>
+                  ) : (
+                    <div style={styles.memoVersionList}>
+                      {caseMemoVersions.map((memoVersion, index) => {
+                        const isSelected =
+                          Boolean(caseMemo?.id && memoVersion.id) &&
+                          caseMemo?.id === memoVersion.id;
+
+                        return (
+                          <button
+                            key={memoVersion.id || `${memoVersion.createdAt}-${index}`}
+                            type="button"
+                            style={{
+                              ...styles.memoVersionButton,
+                              ...(isSelected ? styles.activeMemoVersionButton : {}),
+                            }}
+                            onClick={() => selectCaseMemoVersion(memoVersion)}
+                          >
+                            <div style={styles.memoVersionTopRow}>
+                              <strong style={styles.memoVersionTitle}>
+                                {index === 0 ? 'النسخة الأحدث' : `نسخة رقم ${caseMemoVersions.length - index}`}
+                              </strong>
+
+                              {isSelected && (
+                                <span style={styles.memoVersionSelectedBadge}>معروضة</span>
+                              )}
+                            </div>
+
+                            <span style={styles.memoVersionMeta}>
+                              {memoVersion.createdAt || memoVersion.updatedAt
+                                ? formatDate(memoVersion.createdAt || memoVersion.updatedAt)
+                                : 'تاريخ غير محدد'}
+                            </span>
+
+                            <span style={styles.memoVersionMeta}>
+                              الخطورة: {getMemoRiskLabel(memoVersion.riskLevel)} · المواد:{' '}
+                              {memoVersion.appliedArticles?.length || 0}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 <h2 style={styles.cardTitle}>ملخص محتوى المذكرة</h2>
 
                 <RenderList title="الوقائع الرئيسية" items={caseMemo.keyFacts} />
@@ -2670,7 +2764,7 @@ const styles: Record<string, CSSProperties> = {
   },
   memoStatusGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
+    gridTemplateColumns: 'repeat(5, 1fr)',
     gap: '12px',
   },
   memoStatusCard: {
@@ -2864,6 +2958,82 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     whiteSpace: 'nowrap',
     fontWeight: 700,
+  },
+  memoVersionsBox: {
+    background: '#0f172a',
+    border: '1px solid #243244',
+    borderRadius: '16px',
+    padding: '16px',
+    marginBottom: '22px',
+  },
+  memoVersionsHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '12px',
+    marginBottom: '14px',
+  },
+  memoVersionsHint: {
+    margin: '-10px 0 0',
+    color: '#94a3b8',
+    fontSize: '13px',
+    lineHeight: 1.7,
+  },
+  memoVersionCountBadge: {
+    display: 'inline-block',
+    background: 'rgba(59, 130, 246, 0.14)',
+    color: '#bfdbfe',
+    border: '1px solid rgba(147, 197, 253, 0.24)',
+    borderRadius: '999px',
+    padding: '6px 10px',
+    fontSize: '12px',
+    fontWeight: 800,
+    whiteSpace: 'nowrap',
+  },
+  memoVersionList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  memoVersionButton: {
+    width: '100%',
+    background: '#111827',
+    color: '#cbd5e1',
+    border: '1px solid #243244',
+    borderRadius: '14px',
+    padding: '13px',
+    cursor: 'pointer',
+    textAlign: 'right',
+  },
+  activeMemoVersionButton: {
+    border: '1px solid rgba(147, 197, 253, 0.55)',
+    background: 'rgba(37, 99, 235, 0.14)',
+  },
+  memoVersionTopRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '8px',
+  },
+  memoVersionTitle: {
+    color: '#ffffff',
+    fontSize: '14px',
+  },
+  memoVersionSelectedBadge: {
+    background: 'rgba(34, 197, 94, 0.14)',
+    color: '#bbf7d0',
+    border: '1px solid rgba(74, 222, 128, 0.28)',
+    borderRadius: '999px',
+    padding: '4px 8px',
+    fontSize: '11px',
+    fontWeight: 800,
+  },
+  memoVersionMeta: {
+    display: 'block',
+    color: '#94a3b8',
+    fontSize: '12px',
+    lineHeight: 1.7,
   },
   memoSideNote: {
     marginTop: '18px',
