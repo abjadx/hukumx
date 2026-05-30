@@ -161,6 +161,19 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'space-between',
     gap: '20px',
   },
+  highlightedCard: {
+    minHeight: '220px',
+    border: '1px solid rgba(251, 191, 36, 0.42)',
+    background:
+      'linear-gradient(135deg, rgba(120, 53, 15, 0.26), rgba(15, 23, 42, 0.9))',
+    borderRadius: '26px',
+    padding: '24px',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    gap: '20px',
+  },
   cardTitle: {
     margin: 0,
     color: '#ffffff',
@@ -316,8 +329,8 @@ export default async function AdminHomePage({ searchParams }: PageProps) {
           <span style={styles.label}>Admin Control Center</span>
           <h2 style={styles.title}>مركز إدارة Hukumx</h2>
           <p style={styles.subtitle}>
-            هذه الصفحة تجمع إدارة المصادر القانونية، مراجعة المواد، القضايا، المذكرات،
-            ومؤشرات النظام في شاشة واحدة بدل الدخول إلى كل رابط يدويًا.
+            هذه الصفحة تجمع إدارة المصادر القانونية، إدخال التشريعات من الملفات، مراجعة المواد،
+            القضايا، المذكرات، ومؤشرات النظام في شاشة واحدة بدل الدخول إلى كل رابط يدويًا.
           </p>
         </section>
 
@@ -346,7 +359,7 @@ export default async function AdminHomePage({ searchParams }: PageProps) {
             <div style={styles.statNumber}>{stats.countriesCount}</div>
           </div>
           <div style={styles.statCard}>
-            <div style={styles.statLabel}>القوانين</div>
+            <div style={styles.statLabel}>التشريعات</div>
             <div style={styles.statNumber}>{stats.sourcesCount}</div>
           </div>
           <div style={styles.statCard}>
@@ -360,11 +373,24 @@ export default async function AdminHomePage({ searchParams }: PageProps) {
         </section>
 
         <section style={styles.grid}>
+          <div style={styles.highlightedCard}>
+            <div>
+              <h3 style={styles.cardTitle}>إدخال تشريع من ملف</h3>
+              <p style={styles.cardText}>
+                رفع PDF أو TXT ومعالجته بالذكاء الصناعي لإدخاله كمواد قانونية مع تصنيف نوع التشريع:
+                قانون، نظام، تعليمات، قرار، أو دستور.
+              </p>
+            </div>
+            <Link href={`/admin/legal-sources/import?${keyQuery}`} style={styles.primaryButton}>
+              إدخال تشريع
+            </Link>
+          </div>
+
           <div style={styles.card}>
             <div>
               <h3 style={styles.cardTitle}>إدارة المصادر القانونية</h3>
               <p style={styles.cardText}>
-                عرض الدول والقوانين والمواد القانونية، البحث، الفلترة، وتشغيل مراجعة AI للمواد غير المراجعة.
+                عرض الدول والتشريعات والمواد القانونية، البحث، الفلترة، وتشغيل مراجعة AI للمواد غير المراجعة.
               </p>
             </div>
             <Link href={`/admin/legal-sources?${keyQuery}`} style={styles.primaryButton}>فتح المصادر</Link>
