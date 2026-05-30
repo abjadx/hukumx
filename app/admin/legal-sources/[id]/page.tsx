@@ -1,10 +1,21 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import OpenAI from 'openai';
 import type { CSSProperties } from 'react';
 import { prisma } from '../../../lib/prisma';
 import DeleteLegalSourceButton from '../../../components/DeleteLegalSourceButton';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const AI_SOURCE_BATCH_SIZE = 5;
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const OPENAI_REVIEW_MODEL =
+  process.env.OPENAI_REVIEW_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
 type PageProps = {
   params?: Promise<{
@@ -31,6 +42,48 @@ type SourceArticle = {
 function getSingleParam(value?: string | string[]) {
   if (Array.isArray(value)) return value[0] || '';
   return value || '';
+}
+
+function extractOutputText(response: unknown): string {
+  if (
+    typeof response === 'object' &&
+    response !== null &&
+    'output_text' in response &&
+    typeof response.output_text === 'string'
+  ) {
+    return response.output_text;
+  }
+
+  if (
+    typeof response === 'object' &&
+    response !== null &&
+    'output' in response &&
+    Array.isArray(response.output)
+  ) {
+    for (const item of response.output) {
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        'content' in item &&
+        Array.isArray(item.content)
+      ) {
+        for (const contentItem of item.content) {
+          if (
+            typeof contentItem === 'object' &&
+            contentItem !== null &&
+            'type' in contentItem &&
+            'text' in contentItem &&
+            (contentItem.type === 'output_text' || contentItem.type === 'text') &&
+            typeof contentItem.text === 'string'
+          ) {
+            return contentItem.text;
+          }
+        }
+      }
+    }
+  }
+
+  return '';
 }
 
 function normalizeTextForCompare(value?: string | null) {
@@ -177,6 +230,214 @@ function formatDate(value?: Date | string | null) {
     return String(value);
   }
 }
+
+
+async function generateProcessedArticleForSource(article: {
+  articleNumber: string;
+  articleText: string;
+  legalSource: {
+    titleAr: string;
+    country: {
+      nameAr: string;
+    };
+  };
+}) {
+  const response = await openai.responses.create({
+    model: OPENAI_REVIEW_MODEL,
+    temperature: 0,
+    input: [
+      {
+        role: 'system',
+        content: `
+أنت محرر ومدقق قانوني عربي متخصص في تصحيح النصوص القانونية المستخرجة من PDF/OCR.
+
+مهمتك:
+1. تصحيح أخطاء OCR الواضحة.
+2. دمج الأسطر المقطوعة داخل الجملة الواحدة.
+3. الحفاظ على كامل النص القانوني دون تلخيص.
+4. عدم إضافة أي حكم قانوني غير موجود.
+5. عدم حذف أي حكم قانوني.
+6. الحفاظ على أرقام البنود والفقرات.
+7. أعد JSON فقط بدون Markdown.
+
+أعد JSON بهذا الشكل:
+{
+  "correctedText": "النص المصحح كاملًا",
+  "detectedIssues": ["الأخطاء التي تم تصحيحها"],
+  "uncertainTerms": ["كلمات غير مؤكدة تحتاج مراجعة"]
+}
+        `.trim(),
+      },
+      {
+        role: 'user',
+        content: `
+التشريع: ${article.legalSource.titleAr}
+الدولة: ${article.legalSource.country.nameAr}
+رقم المادة: ${article.articleNumber}
+
+النص الأصلي المستخرج:
+${article.articleText}
+        `.trim(),
+      },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'legal_article_processing',
+        strict: true,
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            correctedText: { type: 'string' },
+            detectedIssues: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            uncertainTerms: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+          required: ['correctedText', 'detectedIssues', 'uncertainTerms'],
+        },
+      },
+    },
+  });
+
+  const outputText = extractOutputText(response).trim();
+
+  try {
+    const parsed = JSON.parse(outputText) as {
+      correctedText?: string;
+      detectedIssues?: unknown[];
+      uncertainTerms?: unknown[];
+    };
+
+    const correctedText = String(parsed.correctedText || '').trim();
+    if (!correctedText) return null;
+
+    const detectedIssues = Array.isArray(parsed.detectedIssues)
+      ? parsed.detectedIssues.filter((item): item is string => typeof item === 'string')
+      : [];
+
+    const uncertainTerms = Array.isArray(parsed.uncertainTerms)
+      ? parsed.uncertainTerms.filter((item): item is string => typeof item === 'string')
+      : [];
+
+    return {
+      correctedText,
+      reviewNotes: [
+        'تم توليد نص معالج بالذكاء الصناعي. يحتاج مراجعة واعتماد قبل استخدامه كنص نهائي.',
+        detectedIssues.length ? `الأخطاء المكتشفة: ${detectedIssues.join(' | ')}` : '',
+        uncertainTerms.length ? `كلمات تحتاج مراجعة: ${uncertainTerms.join(' | ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    };
+  } catch {
+    return outputText
+      ? {
+          correctedText: outputText,
+          reviewNotes:
+            'تم توليد نص معالج بالذكاء الصناعي، لكن لم يتمكن النظام من قراءة تقرير التصحيح بصيغة منظمة.',
+        }
+      : null;
+  }
+}
+
+async function processLegalSourceArticlesBatch(formData: FormData) {
+  'use server';
+
+  const adminKey = String(formData.get('key') || '');
+  const sourceId = String(formData.get('sourceId') || '');
+
+  const expectedAdminKey = process.env.ADMIN_ACCESS_KEY;
+
+  if (!expectedAdminKey || adminKey !== expectedAdminKey) {
+    throw new Error('Unauthorized admin action');
+  }
+
+  if (!sourceId) {
+    throw new Error('Missing legal source id');
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured');
+  }
+
+  const articles = await prisma.legalArticle.findMany({
+    where: {
+      legalSourceId: sourceId,
+      reviewStatus: {
+        not: 'approved',
+      },
+      articleTextClean: null,
+      legalSource: {
+        isActive: true,
+      },
+    },
+    include: {
+      legalSource: {
+        include: {
+          country: true,
+        },
+      },
+    },
+  });
+
+  const batchArticles = [...articles]
+    .sort((a, b) => compareArticleNumbers(a.articleNumber, b.articleNumber))
+    .slice(0, AI_SOURCE_BATCH_SIZE);
+
+  let processedCount = 0;
+
+  for (const article of batchArticles) {
+    try {
+      const result = await generateProcessedArticleForSource(article);
+
+      if (!result?.correctedText) {
+        continue;
+      }
+
+      await prisma.legalArticle.update({
+        where: {
+          id: article.id,
+        },
+        data: {
+          articleTextClean: result.correctedText,
+          reviewStatus: 'needs_review',
+          reviewNotes: result.reviewNotes,
+          reviewedAt: null,
+          reviewedBy: null,
+        },
+      });
+
+      processedCount += 1;
+    } catch (error) {
+      await prisma.legalArticle.update({
+        where: {
+          id: article.id,
+        },
+        data: {
+          reviewStatus: 'needs_review',
+          reviewNotes: `فشل توليد نص معالج بالذكاء الصناعي لهذه المادة: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`,
+          reviewedAt: null,
+          reviewedBy: null,
+        },
+      });
+    }
+  }
+
+  redirect(
+    `/admin/legal-sources/${encodeURIComponent(sourceId)}?key=${encodeURIComponent(
+      adminKey
+    )}&processed=${processedCount}`
+  );
+}
+
 
 const styles: Record<string, CSSProperties> = {
   page: {
@@ -484,6 +745,13 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
           <Link href={`/admin/legal-sources?${keyQuery}`} style={styles.button}>كل التشريعات</Link>
           <Link href={`/admin/legal-sources/import?${keyQuery}`} style={styles.primaryButton}>إدخال تشريع جديد</Link>
           <Link href={reimportHref} style={styles.primaryButton}>إعادة إدخال هذا التشريع</Link>
+          <form action={processLegalSourceArticlesBatch} style={{ margin: 0 }}>
+            <input name="key" type="hidden" value={adminKey} />
+            <input name="sourceId" type="hidden" value={source.id} />
+            <button type="submit" style={styles.primaryButton}>
+              معالجة دفعة بالذكاء الصناعي
+            </button>
+          </form>
           <DeleteLegalSourceButton
             sourceId={source.id}
             adminKey={adminKey}
@@ -523,6 +791,7 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
           </div>
         </section>
 
+        {/* النص الظاهر لا يعرض النص الأصلي: المعتمد أولًا، ثم المعالج بالذكاء الصناعي فقط. */}
         <section style={styles.section}>
           <form method="GET" style={styles.formRow}>
             <input name="key" type="hidden" value={adminKey} />

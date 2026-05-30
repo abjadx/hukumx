@@ -704,6 +704,7 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
   const articleId = getSingleParam(params?.articleId).trim();
   const sourceId = getSingleParam(params?.sourceId).trim();
   const articleNumber = getSingleParam(params?.article).trim();
+  const articleIdParam = getSingleParam(params?.articleId).trim();
   const saved = getSingleParam(params?.saved);
 
   const expectedAdminKey = process.env.ADMIN_ACCESS_KEY;
@@ -860,7 +861,7 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
 
             <input
               name="article"
-              defaultValue={articleNumber}
+              defaultValue={article?.articleNumber || articleNumber || ''}
               placeholder="اكتب رقم المادة، مثال: 5"
               style={styles.input}
             />
