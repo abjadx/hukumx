@@ -248,8 +248,10 @@ export default function AnswerBox({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          articleNumber,
-          sourceTitle,
+          articleNumber: String(articleNumber || '').trim(),
+          number: String(articleNumber || '').trim(),
+          article: String(articleNumber || '').trim(),
+          sourceTitle: String(sourceTitle || '').trim(),
           country: selectedCountry?.name,
         }),
       });
@@ -293,7 +295,7 @@ export default function AnswerBox({
         sourceTitle:
           data.sourceTitle ||
           sourceTitle ||
-          'قانون أصول المحاكمات المدنية الأردني',
+          'مصدر قانوني معتمد',
         articleText: normalizeLegalReferencesForDisplay(data.articleText || ''),
       });
     } catch {

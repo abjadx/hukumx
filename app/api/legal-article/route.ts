@@ -3,28 +3,12 @@ import { prisma } from '../../lib/prisma';
 
 export const runtime = 'nodejs';
 
-type ArticleWithSource = {
-  articleNumber: string;
-  articleText: string;
-  articleTextClean: string | null;
-  articleTextReviewed: string | null;
-  reviewStatus: string;
-  legalSource: {
-    titleAr: string;
-    titleEn: string | null;
-    slug: string;
-    country: {
-      nameAr: string;
-    };
-  };
-};
-
 function normalizeArticleNumber(value: string): string {
-  return value.replace(/[^d]/g, '').trim();
+  return String(value || '').replace(/[^d]/g, '').trim();
 }
 
 function normalizeArabic(value: string): string {
-  return value
+  return String(value || '')
     .toLowerCase()
     .replace(/[إأآا]/g, 'ا')
     .replace(/ى/g, 'ي')
@@ -34,95 +18,8 @@ function normalizeArabic(value: string): string {
     .trim();
 }
 
-function uniqueStrings(items: string[]): string[] {
-  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
-}
-
-function tokenizeSourceTitle(value: string): string[] {
-  return uniqueStrings(
-    normalizeArabic(value)
-      .split(/[^\u0600-\u06FF0-9]+/g)
-      .map((term) => term.trim())
-      .filter((term) => term.length >= 3)
-      .filter(
-        (term) =>
-          ![
-            'قانون',
-            'القانون',
-            'لسنه',
-            'سنه',
-            'اردني',
-            'الاردني',
-            'الاردنيه',
-            'المملكه',
-            'الهاشميه',
-          ].includes(term)
-      )
-  );
-}
-
-function extractYears(value: string): string[] {
-  return uniqueStrings(value.match(/\b(?:19|20)\d{2}\b/g) || []);
-}
-
-function scoreSourceTitleMatch(article: ArticleWithSource, requestedTitle: string): number {
-  const requested = normalizeArabic(requestedTitle);
-  const titleAr = normalizeArabic(article.legalSource.titleAr);
-  const titleEn = normalizeArabic(article.legalSource.titleEn || '');
-  const slug = normalizeArabic(article.legalSource.slug);
-
-  if (!requested) {
-    return 1;
-  }
-
-  let score = 0;
-
-  if (titleAr === requested || titleEn === requested || slug === requested) {
-    score += 1000;
-  }
-
-  if (requested.includes(titleAr) || titleAr.includes(requested)) {
-    score += 600;
-  }
-
-  const requestedTokens = tokenizeSourceTitle(requestedTitle);
-  const sourceTokens = tokenizeSourceTitle(
-    [article.legalSource.titleAr, article.legalSource.titleEn || '', article.legalSource.slug]
-      .filter(Boolean)
-      .join(' ')
-  );
-
-  for (const token of requestedTokens) {
-    if (sourceTokens.includes(token)) {
-      score += 80;
-    }
-  }
-
-  const requestedYears = extractYears(requestedTitle);
-  const sourceYears = extractYears(article.legalSource.titleAr);
-
-  for (const year of requestedYears) {
-    if (sourceYears.includes(year)) {
-      score += 120;
-    }
-  }
-
-  if (requested.includes('دستور') && titleAr.includes('دستور')) {
-    score += 500;
-  }
-
-  if (
-    requested.includes('اصول المحاكمات') &&
-    (titleAr.includes('اصول المحاكمات') || titleAr.includes('محاكمات مدنيه'))
-  ) {
-    score += 500;
-  }
-
-  return score;
-}
-
 function cleanArticleTextForDisplay(value: string): string {
-  return value
+  return String(value || '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
@@ -155,59 +52,27 @@ function getApprovedArticleText(article: {
   return '';
 }
 
-async function findLegalArticle(params: {
-  articleNumber: string;
-  country?: string;
-  sourceTitle?: string;
-}) {
-  const articleNumber = normalizeArticleNumber(params.articleNumber);
-  const requestedSourceTitle = String(params.sourceTitle || '').trim();
+function scoreSourceTitleMatch(sourceTitleFromQuestion: string, dbTitle: string, dbSlug: string) {
+  const requested = normalizeArabic(sourceTitleFromQuestion);
+  const title = normalizeArabic(dbTitle);
+  const slug = normalizeArabic(dbSlug);
 
-  const candidates = (await prisma.legalArticle.findMany({
-    where: {
-      articleNumber,
-      reviewStatus: 'approved',
-      articleTextReviewed: {
-        not: null,
-      },
-      legalSource: {
-        isActive: true,
-        country: {
-          code: 'JO',
-        },
-      },
-    },
-    include: {
-      legalSource: {
-        include: {
-          country: true,
-        },
-      },
-    },
-  })) as ArticleWithSource[];
+  if (!requested) return 0;
 
-  if (!candidates.length) {
-    return null;
+  let score = 0;
+
+  if (title === requested) score += 1000;
+  if (title.includes(requested) || requested.includes(title)) score += 800;
+
+  if (requested.includes('دستور') && title.includes('دستور')) score += 1000;
+  if (requested.includes('اصول المحاكمات') && title.includes('اصول المحاكمات')) score += 1000;
+  if (requested.includes('محاكمات مدنيه') && title.includes('محاكمات مدنيه')) score += 1000;
+
+  for (const term of requested.split(' ').filter((item) => item.length >= 3)) {
+    if (title.includes(term) || slug.includes(term)) score += 20;
   }
 
-  if (!requestedSourceTitle) {
-    return candidates[0];
-  }
-
-  const ranked = candidates
-    .map((article) => ({
-      article,
-      score: scoreSourceTitleMatch(article, requestedSourceTitle),
-    }))
-    .sort((a, b) => b.score - a.score);
-
-  const best = ranked[0];
-
-  if (!best || best.score < 80) {
-    return null;
-  }
-
-  return best.article;
+  return score;
 }
 
 export async function POST(req: NextRequest) {
@@ -216,39 +81,81 @@ export async function POST(req: NextRequest) {
       country?: string;
       sourceTitle?: string;
       articleNumber?: string;
+      number?: string;
+      article?: string;
     };
 
     const articleNumber = normalizeArticleNumber(
-      String(body.articleNumber || '')
+      body.articleNumber || body.number || body.article || ''
     );
 
     if (!articleNumber) {
       return NextResponse.json(
-        { error: 'رقم المادة مطلوب.' },
+        {
+          error: 'رقم المادة مطلوب.',
+          receivedBody: body,
+        },
         { status: 400 }
       );
     }
 
-    const sourceTitle = String(body.sourceTitle || '').trim();
+    const requestedSourceTitle = String(body.sourceTitle || '').trim();
 
-    const article = await findLegalArticle({
-      articleNumber,
-      country: String(body.country || '').trim(),
-      sourceTitle,
+    const articles = await prisma.legalArticle.findMany({
+      where: {
+        articleNumber,
+        reviewStatus: 'approved',
+        articleTextReviewed: {
+          not: null,
+        },
+        legalSource: {
+          isActive: true,
+          country: {
+            code: 'JO',
+          },
+        },
+      },
+      include: {
+        legalSource: {
+          include: {
+            country: true,
+          },
+        },
+      },
     });
 
-    if (!article) {
+    if (!articles.length) {
       return NextResponse.json(
         {
-          error: sourceTitle
-            ? `لم يتم العثور على المادة ${articleNumber} ضمن المصدر: ${sourceTitle}.`
-            : `لم يتم العثور على المادة ${articleNumber} ضمن المواد المعتمدة في قاعدة البيانات.`,
+          error: `لم يتم العثور على المادة ${articleNumber} ضمن المواد المعتمدة.`,
         },
         { status: 404 }
       );
     }
 
-    const bestArticleText = getApprovedArticleText(article);
+    const rankedArticles = articles
+      .map((article) => ({
+        article,
+        score: scoreSourceTitleMatch(
+          requestedSourceTitle,
+          article.legalSource.titleAr,
+          article.legalSource.slug
+        ),
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const selected = rankedArticles[0]?.article;
+
+    if (!selected) {
+      return NextResponse.json(
+        {
+          error: `لم يتم العثور على المادة ${articleNumber} من المصدر القانوني المطلوب.`,
+        },
+        { status: 404 }
+      );
+    }
+
+    const bestArticleText = getApprovedArticleText(selected);
 
     if (!bestArticleText) {
       return NextResponse.json(
@@ -260,11 +167,11 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
-      articleNumber: article.articleNumber,
-      sourceTitle: article.legalSource.titleAr,
-      country: article.legalSource.country.nameAr,
-      reviewStatus: article.reviewStatus,
-      isReviewed: article.reviewStatus === 'approved',
+      articleNumber: selected.articleNumber,
+      sourceTitle: selected.legalSource.titleAr,
+      country: selected.legalSource.country.nameAr,
+      reviewStatus: selected.reviewStatus,
+      isReviewed: true,
       articleText: cleanArticleTextForDisplay(bestArticleText),
     });
   } catch (error) {
