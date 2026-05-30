@@ -97,6 +97,8 @@ type CaseLegalMemo = {
   missingInformation: string[];
   riskLevel: 'low' | 'medium' | 'high' | 'unknown' | string;
   disclaimer: string;
+  generatedBy?: string | null;
+  isFinal?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -363,6 +365,17 @@ function buildCaseMemoCopyText(memo: CaseLegalMemo) {
     .join('\n\n');
 }
 
+
+function applyFinalFlagToMemos(
+  memos: CaseLegalMemo[],
+  finalMemo: CaseLegalMemo | null
+): CaseLegalMemo[] {
+  return memos.map((memo) => ({
+    ...memo,
+    isFinal: Boolean(finalMemo?.id && memo.id === finalMemo.id),
+  }));
+}
+
 export default function CaseDetailsPage() {
   const params = useParams<{ id: string }>();
   const caseId = params.id;
@@ -380,6 +393,7 @@ export default function CaseDetailsPage() {
   const [articleCopied, setArticleCopied] = useState(false);
   const [caseMemo, setCaseMemo] = useState<CaseLegalMemo | null>(null);
   const [caseMemoVersions, setCaseMemoVersions] = useState<CaseLegalMemo[]>([]);
+  const [finalCaseMemo, setFinalCaseMemo] = useState<CaseLegalMemo | null>(null);
   const [memoLoading, setMemoLoading] = useState(false);
   const [memoError, setMemoError] = useState('');
   const [memoCopied, setMemoCopied] = useState(false);
@@ -456,6 +470,7 @@ export default function CaseDetailsPage() {
       if (res.status === 404) {
         setCaseMemo(null);
         setCaseMemoVersions([]);
+        setFinalCaseMemo(null);
         return;
       }
 
@@ -469,14 +484,24 @@ export default function CaseDetailsPage() {
           ? json.memos
           : [];
 
-      const latestMemo: CaseLegalMemo | null =
-        json?.data?.latestMemo || json?.latestMemo || json?.memo || memos[0] || null;
+      const finalMemo: CaseLegalMemo | null =
+        json?.data?.finalMemo || json?.finalMemo || null;
+      const memosWithFinalFlag = applyFinalFlagToMemos(memos, finalMemo);
 
-      setCaseMemoVersions(memos);
-      setCaseMemo(latestMemo);
+      const latestMemo: CaseLegalMemo | null =
+        json?.data?.latestMemo || json?.latestMemo || json?.memo || memosWithFinalFlag[0] || null;
+
+      setFinalCaseMemo(finalMemo);
+      setCaseMemoVersions(memosWithFinalFlag);
+      setCaseMemo(
+        latestMemo?.id && finalMemo?.id && latestMemo.id === finalMemo.id
+          ? { ...latestMemo, isFinal: true }
+          : latestMemo
+      );
     } catch (err: any) {
       setCaseMemo(null);
       setCaseMemoVersions([]);
+      setFinalCaseMemo(null);
       setMemoError(err.message || 'تعذر جلب سجل المذكرات القانونية المحفوظة');
     } finally {
       setMemoLoading(false);
@@ -976,7 +1001,7 @@ export default function CaseDetailsPage() {
           (item) => item.id && item.id !== memo.id
         );
 
-        return [memo, ...remainingVersions];
+        return applyFinalFlagToMemos([memo, ...remainingVersions], finalCaseMemo);
       });
       setActiveTab('memo');
       setSuccessMessage('تم توليد وحفظ المذكرة القانونية بنجاح');
@@ -1009,18 +1034,20 @@ export default function CaseDetailsPage() {
 
 
 
-  async function downloadCaseMemoWord() {
-    if (!caseMemo) {
+  async function downloadMemoWord(memoToDownload: CaseLegalMemo | null) {
+    if (!memoToDownload) {
       setMemoError('لا توجد مذكرة قانونية محفوظة لتحميلها.');
       return;
     }
 
     try {
-      setSaving('memo-word');
+      setSaving(`memo-word-${memoToDownload.id || 'current'}`);
       setMemoError('');
       setSuccessMessage('');
 
-      const memoQuery = caseMemo.id ? `?memoId=${encodeURIComponent(caseMemo.id)}` : '';
+      const memoQuery = memoToDownload.id
+        ? `?memoId=${encodeURIComponent(memoToDownload.id)}`
+        : '';
 
       const res = await fetch(`/api/cases/${caseId}/memo/word${memoQuery}`, {
         method: 'GET',
@@ -1037,7 +1064,7 @@ export default function CaseDetailsPage() {
       const link = document.createElement('a');
 
       link.href = url;
-      link.download = `hukumx-legal-memo-${caseMemo.id || caseId}.doc`;
+      link.download = `hukumx-legal-memo-${memoToDownload.id || caseId}.doc`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1049,6 +1076,10 @@ export default function CaseDetailsPage() {
     } finally {
       setSaving('');
     }
+  }
+
+  async function downloadCaseMemoWord() {
+    await downloadMemoWord(caseMemo);
   }
 
   function selectCaseMemoVersion(memo: CaseLegalMemo) {
@@ -1096,22 +1127,122 @@ export default function CaseDetailsPage() {
           ? json.memos
           : [];
 
+      const finalMemo: CaseLegalMemo | null =
+        json?.data?.finalMemo || json?.finalMemo || null;
+      const memosWithFinalFlag = applyFinalFlagToMemos(memos, finalMemo);
       const latestMemo: CaseLegalMemo | null =
-        json?.data?.latestMemo || json?.latestMemo || memos[0] || null;
+        json?.data?.latestMemo || json?.latestMemo || memosWithFinalFlag[0] || null;
 
-      setCaseMemoVersions(memos);
+      setFinalCaseMemo(finalMemo);
+      setCaseMemoVersions(memosWithFinalFlag);
       setCaseMemo((currentMemo) => {
         if (!currentMemo?.id || currentMemo.id === memo.id) {
           return latestMemo;
         }
 
-        const stillExists = memos.some((item) => item.id === currentMemo.id);
-        return stillExists ? currentMemo : latestMemo;
+        const stillExists = memosWithFinalFlag.some((item) => item.id === currentMemo.id);
+        if (!stillExists) return latestMemo;
+
+        const refreshedMemo = memosWithFinalFlag.find((item) => item.id === currentMemo.id);
+        return refreshedMemo || currentMemo;
       });
 
       setSuccessMessage('تم حذف نسخة المذكرة القانونية بنجاح');
     } catch (err: any) {
       setMemoError(err.message || 'تعذر حذف نسخة المذكرة القانونية');
+    } finally {
+      setSaving('');
+    }
+  }
+
+
+  async function approveCaseMemoAsFinal(memo: CaseLegalMemo) {
+    if (!memo.id) {
+      setMemoError('لا يمكن اعتماد هذه النسخة لعدم وجود معرّف محفوظ لها.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'هل تريد اعتماد هذه النسخة كمذكرة نهائية؟ ستبقى النسخة النهائية ثابتة حتى لو تم توليد مذكرات جديدة.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSaving(`final-memo-${memo.id}`);
+      setMemoError('');
+      setSuccessMessage('');
+
+      const res = await fetch(`/api/cases/${caseId}/memo/final`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify({ memoId: memo.id }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.error || 'فشل في اعتماد المذكرة كنسخة نهائية');
+      }
+
+      const finalMemo: CaseLegalMemo | null =
+        json?.data?.finalMemo || json?.finalMemo || json?.memo || null;
+
+      setFinalCaseMemo(finalMemo);
+      setCaseMemoVersions((previousVersions) =>
+        applyFinalFlagToMemos(previousVersions, finalMemo)
+      );
+      setCaseMemo((currentMemo) => {
+        if (!currentMemo) return finalMemo;
+        if (finalMemo?.id && currentMemo.id === finalMemo.id) {
+          return { ...currentMemo, isFinal: true };
+        }
+        return { ...currentMemo, isFinal: false };
+      });
+
+      setSuccessMessage('تم اعتماد المذكرة كنسخة نهائية بنجاح');
+    } catch (err: any) {
+      setMemoError(err.message || 'تعذر اعتماد المذكرة كنسخة نهائية');
+    } finally {
+      setSaving('');
+    }
+  }
+
+  async function clearFinalCaseMemo() {
+    const confirmed = window.confirm(
+      'هل تريد إلغاء اعتماد المذكرة النهائية؟ ستبقى النسخة محفوظة ضمن السجل كمسودة عادية.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSaving('clear-final-memo');
+      setMemoError('');
+      setSuccessMessage('');
+
+      const res = await fetch(`/api/cases/${caseId}/memo/final`, {
+        method: 'DELETE',
+        cache: 'no-store',
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.error || 'فشل في إلغاء اعتماد المذكرة النهائية');
+      }
+
+      setFinalCaseMemo(null);
+      setCaseMemoVersions((previousVersions) =>
+        previousVersions.map((memo) => ({ ...memo, isFinal: false }))
+      );
+      setCaseMemo((currentMemo) =>
+        currentMemo ? { ...currentMemo, isFinal: false } : currentMemo
+      );
+      setSuccessMessage('تم إلغاء اعتماد المذكرة النهائية');
+    } catch (err: any) {
+      setMemoError(err.message || 'تعذر إلغاء اعتماد المذكرة النهائية');
     } finally {
       setSaving('');
     }
@@ -2030,7 +2161,7 @@ export default function CaseDetailsPage() {
                     <button
                       style={styles.copyButton}
                       onClick={copyCaseMemoText}
-                      disabled={saving === 'case-memo' || saving === 'memo-word'}
+                      disabled={saving === 'case-memo' || saving.startsWith('memo-word')}
                     >
                       {memoCopied ? 'تم النسخ ✅' : 'نسخ المذكرة'}
                     </button>
@@ -2038,9 +2169,9 @@ export default function CaseDetailsPage() {
                     <button
                       style={styles.wordButton}
                       onClick={downloadCaseMemoWord}
-                      disabled={saving === 'case-memo' || saving === 'memo-word'}
+                      disabled={saving === 'case-memo' || saving.startsWith('memo-word')}
                     >
-                      {saving === 'memo-word' ? 'جاري تجهيز Word...' : 'تحميل Word'}
+                      {saving.startsWith('memo-word') ? 'جاري تجهيز Word...' : 'تحميل Word'}
                     </button>
                   </>
                 )}
@@ -2090,6 +2221,13 @@ export default function CaseDetailsPage() {
                   {caseMemoVersions.length || 0}
                 </strong>
               </div>
+
+              <div style={styles.memoStatusCard}>
+                <span style={styles.memoStatusLabel}>النسخة النهائية</span>
+                <strong style={styles.memoStatusValue}>
+                  {finalCaseMemo ? 'معتمدة' : 'غير معتمدة'}
+                </strong>
+              </div>
             </div>
           </section>
 
@@ -2104,6 +2242,52 @@ export default function CaseDetailsPage() {
                   يتم الآن بناء مذكرة قانونية منظمة من بيانات القضية والمستندات
                   والتحليل والمواد المرتبطة.
                 </p>
+              </div>
+            </section>
+          )}
+
+          {finalCaseMemo && (
+            <section style={styles.finalMemoCard}>
+              <div>
+                <span style={styles.finalMemoBadge}>المذكرة النهائية المعتمدة</span>
+                <h2 style={styles.finalMemoTitle}>{finalCaseMemo.title}</h2>
+                <p style={styles.finalMemoText}>
+                  هذه النسخة تم اعتمادها كنسخة نهائية، ولن تتغير عند توليد مذكرات
+                  جديدة. يمكن عرضها أو تحميلها مباشرة كملف Word.
+                </p>
+                <p style={styles.finalMemoMeta}>
+                  تاريخ الاعتماد/آخر تحديث:{' '}
+                  {finalCaseMemo.updatedAt || finalCaseMemo.createdAt
+                    ? formatDate(finalCaseMemo.updatedAt || finalCaseMemo.createdAt)
+                    : 'غير محدد'}
+                </p>
+              </div>
+
+              <div style={styles.finalMemoActions}>
+                <button
+                  style={styles.wordButton}
+                  onClick={() => downloadMemoWord(finalCaseMemo)}
+                  disabled={saving.startsWith('memo-word')}
+                >
+                  {saving === `memo-word-${finalCaseMemo.id || 'current'}`
+                    ? 'جاري تجهيز Word...'
+                    : 'تحميل Word'}
+                </button>
+
+                <button
+                  style={styles.secondaryButton}
+                  onClick={() => selectCaseMemoVersion(finalCaseMemo)}
+                >
+                  عرض النسخة
+                </button>
+
+                <button
+                  style={styles.finalClearButton}
+                  onClick={clearFinalCaseMemo}
+                  disabled={saving === 'clear-final-memo'}
+                >
+                  {saving === 'clear-final-memo' ? 'جاري الإلغاء...' : 'إلغاء الاعتماد'}
+                </button>
               </div>
             </section>
           )}
@@ -2124,6 +2308,9 @@ export default function CaseDetailsPage() {
                   <div>
                     <div style={styles.memoPillsRow}>
                       <span style={styles.savedMemoBadge}>محفوظة</span>
+                      {caseMemo.isFinal && (
+                        <span style={styles.finalMemoBadgeSmall}>نهائية معتمدة</span>
+                      )}
                       <span style={getMemoRiskStyle(caseMemo.riskLevel)}>
                         الخطورة: {getMemoRiskLabel(caseMemo.riskLevel)}
                       </span>
@@ -2143,7 +2330,7 @@ export default function CaseDetailsPage() {
                     <button
                       style={styles.copyButton}
                       onClick={copyCaseMemoText}
-                      disabled={saving === 'memo-word'}
+                      disabled={saving.startsWith('memo-word')}
                     >
                       {memoCopied ? 'تم النسخ ✅' : 'نسخ كامل المذكرة'}
                     </button>
@@ -2151,17 +2338,34 @@ export default function CaseDetailsPage() {
                     <button
                       style={styles.wordButton}
                       onClick={downloadCaseMemoWord}
-                      disabled={saving === 'case-memo' || saving === 'memo-word'}
+                      disabled={saving === 'case-memo' || saving.startsWith('memo-word')}
                     >
-                      {saving === 'memo-word' ? 'جاري تجهيز Word...' : 'تحميل Word'}
+                      {saving.startsWith('memo-word') ? 'جاري تجهيز Word...' : 'تحميل Word'}
                     </button>
 
                     <button
                       style={styles.secondaryButton}
                       onClick={generateCaseMemo}
-                      disabled={saving === 'case-memo' || saving === 'memo-word'}
+                      disabled={saving === 'case-memo' || saving.startsWith('memo-word')}
                     >
                       {saving === 'case-memo' ? 'جاري التحديث...' : 'تحديث النسخة'}
+                    </button>
+
+                    <button
+                      style={caseMemo.isFinal ? styles.finalDisabledButton : styles.finalApproveButton}
+                      onClick={() => approveCaseMemoAsFinal(caseMemo)}
+                      disabled={
+                        Boolean(caseMemo.isFinal) ||
+                        saving === `final-memo-${caseMemo.id}` ||
+                        saving === 'case-memo' ||
+                        saving.startsWith('memo-word')
+                      }
+                    >
+                      {caseMemo.isFinal
+                        ? 'معتمدة نهائيًا'
+                        : saving === `final-memo-${caseMemo.id}`
+                          ? 'جاري الاعتماد...'
+                          : 'اعتماد كنسخة نهائية'}
                     </button>
                   </div>
                 </div>
@@ -2252,8 +2456,26 @@ export default function CaseDetailsPage() {
                               </strong>
 
                               <div style={styles.memoVersionActions}>
+                                {memoVersion.isFinal && (
+                                  <span style={styles.finalMemoBadgeTiny}>نهائية</span>
+                                )}
+
                                 {isSelected && (
                                   <span style={styles.memoVersionSelectedBadge}>معروضة</span>
+                                )}
+
+                                {memoVersion.id && !memoVersion.isFinal && (
+                                  <button
+                                    type="button"
+                                    style={styles.memoVersionFinalButton}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      approveCaseMemoAsFinal(memoVersion);
+                                    }}
+                                    disabled={saving === `final-memo-${memoVersion.id}`}
+                                  >
+                                    {saving === `final-memo-${memoVersion.id}` ? 'جاري...' : 'اعتماد'}
+                                  </button>
                                 )}
 
                                 {memoVersion.id && (
@@ -2813,6 +3035,108 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: 'nowrap',
   },
 
+
+  finalMemoCard: {
+    background: 'linear-gradient(135deg, rgba(120, 53, 15, 0.28), rgba(15, 23, 42, 0.96))',
+    border: '1px solid rgba(251, 191, 36, 0.28)',
+    borderRadius: '22px',
+    padding: '22px',
+    marginBottom: '22px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '18px',
+    boxShadow: '0 22px 70px rgba(0,0,0,0.28)',
+  },
+  finalMemoBadge: {
+    display: 'inline-block',
+    background: 'rgba(245, 158, 11, 0.16)',
+    color: '#fde68a',
+    border: '1px solid rgba(251, 191, 36, 0.3)',
+    borderRadius: '999px',
+    padding: '6px 12px',
+    fontSize: '13px',
+    fontWeight: 900,
+    marginBottom: '12px',
+  },
+  finalMemoBadgeSmall: {
+    display: 'inline-block',
+    background: 'rgba(245, 158, 11, 0.16)',
+    color: '#fde68a',
+    border: '1px solid rgba(251, 191, 36, 0.3)',
+    borderRadius: '999px',
+    padding: '6px 11px',
+    fontSize: '13px',
+    fontWeight: 900,
+  },
+  finalMemoBadgeTiny: {
+    background: 'rgba(245, 158, 11, 0.16)',
+    color: '#fde68a',
+    border: '1px solid rgba(251, 191, 36, 0.3)',
+    borderRadius: '999px',
+    padding: '4px 8px',
+    fontSize: '11px',
+    fontWeight: 900,
+  },
+  finalMemoTitle: {
+    margin: 0,
+    color: '#ffffff',
+    fontSize: '22px',
+    lineHeight: 1.6,
+    fontWeight: 900,
+  },
+  finalMemoText: {
+    margin: '10px 0 0',
+    color: '#cbd5e1',
+    lineHeight: 1.8,
+  },
+  finalMemoMeta: {
+    margin: '10px 0 0',
+    color: '#fde68a',
+    fontSize: '13px',
+    fontWeight: 800,
+  },
+  finalMemoActions: {
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+  },
+  finalApproveButton: {
+    background: 'rgba(245, 158, 11, 0.16)',
+    color: '#fde68a',
+    border: '1px solid rgba(251, 191, 36, 0.3)',
+    borderRadius: '12px',
+    padding: '10px 14px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    fontWeight: 900,
+  },
+  finalDisabledButton: {
+    background: 'rgba(34, 197, 94, 0.14)',
+    color: '#bbf7d0',
+    border: '1px solid rgba(74, 222, 128, 0.28)',
+    borderRadius: '12px',
+    padding: '10px 14px',
+    fontSize: '14px',
+    cursor: 'not-allowed',
+    whiteSpace: 'nowrap',
+    fontWeight: 900,
+  },
+  finalClearButton: {
+    background: 'rgba(239, 68, 68, 0.12)',
+    color: '#fecaca',
+    border: '1px solid rgba(248, 113, 113, 0.28)',
+    borderRadius: '12px',
+    padding: '10px 14px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    fontWeight: 800,
+  },
+
   memoHeroCard: {
     background:
       'linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98))',
@@ -2846,7 +3170,7 @@ const styles: Record<string, CSSProperties> = {
   },
   memoStatusGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(5, 1fr)',
+    gridTemplateColumns: 'repeat(6, 1fr)',
     gap: '12px',
   },
   memoStatusCard: {
@@ -3107,6 +3431,17 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'center',
     gap: '8px',
     flexShrink: 0,
+  },
+  memoVersionFinalButton: {
+    background: 'rgba(245, 158, 11, 0.13)',
+    color: '#fde68a',
+    border: '1px solid rgba(251, 191, 36, 0.26)',
+    borderRadius: '10px',
+    padding: '6px 9px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    fontWeight: 800,
   },
   memoVersionDeleteButton: {
     background: 'rgba(239, 68, 68, 0.12)',

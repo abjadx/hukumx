@@ -57,70 +57,64 @@ export async function GET(
   try {
     const { id: caseId } = await context.params;
 
-    const memos = await prisma.caseMemo.findMany({
-      where: { caseId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
+    const finalMemo = await prisma.caseMemo.findFirst({
+      where: {
+        caseId,
+        generatedBy: 'FINAL',
+      },
+      orderBy: { updatedAt: 'desc' },
     });
 
-    const normalizedMemos = memos.map(normalizeStoredMemo);
-    const latestMemo = normalizedMemos[0] || null;
-    const finalMemo = normalizedMemos.find((memo) => memo.isFinal) || null;
+    const normalizedFinalMemo = finalMemo ? normalizeStoredMemo(finalMemo) : null;
 
     return NextResponse.json({
       success: true,
       data: {
-        latestMemo,
-        finalMemo,
-        memos: normalizedMemos,
-        total: normalizedMemos.length,
+        finalMemo: normalizedFinalMemo,
       },
-      latestMemo,
-      finalMemo,
-      memo: latestMemo,
-      memos: normalizedMemos,
+      finalMemo: normalizedFinalMemo,
+      memo: normalizedFinalMemo,
     });
   } catch (error) {
-    console.error('Hukumx get case memo versions error:', error);
+    console.error('Hukumx get final memo error:', error);
 
     return NextResponse.json(
       {
         success: false,
-        error: 'حدث خطأ أثناء جلب سجل نسخ المذكرات القانونية.',
+        error: 'حدث خطأ أثناء جلب المذكرة النهائية المعتمدة.',
       },
       { status: 500 }
     );
   }
 }
 
-
-export async function DELETE(
+export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: caseId } = await context.params;
-    const { searchParams } = new URL(req.url);
-    const memoId = searchParams.get('memoId')?.trim();
+    const body = (await req.json().catch(() => ({}))) as { memoId?: string };
+    const memoId = body.memoId?.trim();
 
     if (!memoId) {
       return NextResponse.json(
         {
           success: false,
-          error: 'يرجى تحديد نسخة المذكرة المراد حذفها.',
+          error: 'يرجى تحديد نسخة المذكرة المراد اعتمادها كنسخة نهائية.',
         },
         { status: 400 }
       );
     }
 
-    const deleted = await prisma.caseMemo.deleteMany({
+    const existingMemo = await prisma.caseMemo.findFirst({
       where: {
         id: memoId,
         caseId,
       },
     });
 
-    if (deleted.count === 0) {
+    if (!existingMemo) {
       return NextResponse.json(
         {
           success: false,
@@ -130,37 +124,80 @@ export async function DELETE(
       );
     }
 
-    const remainingMemos = await prisma.caseMemo.findMany({
-      where: { caseId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
+    const finalMemo = await prisma.$transaction(async (tx) => {
+      await tx.caseMemo.updateMany({
+        where: {
+          caseId,
+          generatedBy: 'FINAL',
+        },
+        data: {
+          generatedBy: null,
+        },
+      });
+
+      return tx.caseMemo.update({
+        where: { id: memoId },
+        data: {
+          generatedBy: 'FINAL',
+        },
+      });
     });
 
-    const normalizedMemos = remainingMemos.map(normalizeStoredMemo);
-    const latestMemo = normalizedMemos[0] || null;
-    const finalMemo = normalizedMemos.find((memo) => memo.isFinal) || null;
+    const normalizedFinalMemo = normalizeStoredMemo(finalMemo);
 
     return NextResponse.json({
       success: true,
-      deletedMemoId: memoId,
       data: {
-        latestMemo,
-        finalMemo,
-        memos: normalizedMemos,
-        total: normalizedMemos.length,
+        finalMemo: normalizedFinalMemo,
       },
-      latestMemo,
-      finalMemo,
-      memo: latestMemo,
-      memos: normalizedMemos,
+      finalMemo: normalizedFinalMemo,
+      memo: normalizedFinalMemo,
     });
   } catch (error) {
-    console.error('Hukumx delete case memo version error:', error);
+    console.error('Hukumx approve final memo error:', error);
 
     return NextResponse.json(
       {
         success: false,
-        error: 'حدث خطأ أثناء حذف نسخة المذكرة القانونية.',
+        error: 'حدث خطأ أثناء اعتماد المذكرة كنسخة نهائية.',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: caseId } = await context.params;
+
+    await prisma.caseMemo.updateMany({
+      where: {
+        caseId,
+        generatedBy: 'FINAL',
+      },
+      data: {
+        generatedBy: null,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        finalMemo: null,
+      },
+      finalMemo: null,
+      memo: null,
+    });
+  } catch (error) {
+    console.error('Hukumx clear final memo error:', error);
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'حدث خطأ أثناء إلغاء اعتماد المذكرة النهائية.',
       },
       { status: 500 }
     );
