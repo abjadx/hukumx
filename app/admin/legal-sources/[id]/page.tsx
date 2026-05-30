@@ -81,7 +81,7 @@ function getBestArticleText(article: SourceArticle) {
     return article.articleTextReviewed;
   }
 
-  return article.articleTextReviewed || article.articleTextClean || article.articleText;
+  return article.articleTextClean || article.articleTextReviewed || article.articleText;
 }
 
 function trimText(value: string, maxLength = 360) {
@@ -482,9 +482,7 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
 
           {filteredArticles.map((article) => {
             const fullText = getBestArticleText(article);
-            const reviewHref = `/admin/legal-sources/review?${keyQuery}&article=${encodeURIComponent(
-              article.articleNumber
-            )}`;
+            const reviewHref = `/admin/legal-sources/review?${keyQuery}&articleId=${encodeURIComponent(article.id)}`;
 
             return (
               <article key={article.id} style={styles.articleCard}>

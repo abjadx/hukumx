@@ -202,7 +202,7 @@ function getBestAdminArticleText(article: AdminArticle) {
     return article.articleTextReviewed;
   }
 
-  return article.articleTextReviewed || article.articleTextClean || article.articleText;
+  return article.articleTextClean || article.articleTextReviewed || article.articleText;
 }
 
 function getReviewStatusLabel(status: string) {
@@ -1089,9 +1089,7 @@ export default async function LegalSourcesAdminPage({
                 getBestAdminArticleText(article)
               );
 
-              const reviewHref = `/admin/legal-sources/review?key=${encodeURIComponent(
-                adminKey
-              )}&article=${encodeURIComponent(article.articleNumber)}`;
+              const reviewHref = `/admin/legal-sources/review?key=${encodeURIComponent(adminKey)}&articleId=${encodeURIComponent(article.id)}`;
 
               return (
                 <article key={article.id} style={styles.articleCard}>
