@@ -230,7 +230,14 @@ export default function AnswerBox({
     }, 2000);
   };
 
-  const openArticleText = async (articleNumber: string) => {
+  const openArticleText = async (rawArticleNumber: string) => {
+    const articleNumber = String(rawArticleNumber || '').replace(/[^\d]/g, '').trim();
+
+    if (!articleNumber) {
+      setArticleError('رقم المادة مطلوب.');
+      return;
+    }
+
     if (selectedArticle?.articleNumber === articleNumber && !articleLoading) {
       setSelectedArticle(null);
       setArticleError('');
@@ -244,19 +251,21 @@ export default function AnswerBox({
       setArticleError('');
       setSelectedArticle(null);
 
+      const payload = {
+        articleNumber,
+        number: articleNumber,
+        article: articleNumber,
+        sourceTitle: String(sourceTitle || '').trim(),
+        country: selectedCountry?.name,
+      };
+
       const res = await fetch('/api/legal-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          articleNumber: String(articleNumber || '').trim(),
-          number: String(articleNumber || '').trim(),
-          article: String(articleNumber || '').trim(),
-          sourceTitle: String(sourceTitle || '').trim(),
-          country: selectedCountry?.name,
-        }),
+        body: JSON.stringify(payload),
       });
 
-      const text = await res.text();
+      const textResponse = await res.text();
 
       if (currentAnswerKeyRef.current !== requestKey) {
         return;
@@ -267,22 +276,22 @@ export default function AnswerBox({
         articleNumber?: string;
         sourceTitle?: string;
         articleText?: string;
+        receivedBody?: unknown;
       } = {};
 
       try {
-        data = JSON.parse(text);
+        data = JSON.parse(textResponse);
       } catch {
-        console.error('Invalid legal article API response:', text);
-        setArticleError(
-          `عاد الخادم برد غير صالح أثناء جلب نص المادة. كود الحالة: ${res.status}`
-        );
+        console.error('Invalid legal article API response:', textResponse);
+        setArticleError(`عاد الخادم برد غير صالح أثناء جلب نص المادة. كود الحالة: ${res.status}`);
         return;
       }
 
       if (!res.ok) {
-        setArticleError(
-          data.error || `تعذر جلب نص المادة. كود الحالة: ${res.status}`
-        );
+        const debugBody = data.receivedBody
+          ? ` | البيانات المرسلة: ${JSON.stringify(data.receivedBody)}`
+          : '';
+        setArticleError((data.error || `تعذر جلب نص المادة. كود الحالة: ${res.status}`) + debugBody);
         return;
       }
 
@@ -292,10 +301,7 @@ export default function AnswerBox({
 
       setSelectedArticle({
         articleNumber: data.articleNumber || articleNumber,
-        sourceTitle:
-          data.sourceTitle ||
-          sourceTitle ||
-          'مصدر قانوني معتمد',
+        sourceTitle: data.sourceTitle || sourceTitle || 'مصدر قانوني معتمد',
         articleText: normalizeLegalReferencesForDisplay(data.articleText || ''),
       });
     } catch {
@@ -328,7 +334,7 @@ export default function AnswerBox({
           <button
             key={`${variant}-${article}`}
             type="button"
-            onClick={() => openArticleText(article)}
+            onClick={() => openArticleText(String(article))}
             className={buttonClass}
             title={`عرض أو إخفاء نص المادة ${article}`}
           >

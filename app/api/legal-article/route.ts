@@ -4,9 +4,14 @@ import { prisma } from '../../lib/prisma';
 export const runtime = 'nodejs';
 
 function normalizeArticleNumber(value: string): string {
-  return String(value || '').replace(/[^d]/g, '').trim();
-}
+  const normalizedDigits = String(value || '')
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)));
 
+  const numbers = normalizedDigits.match(/\d+/g);
+
+  return numbers ? numbers.join('') : '';
+}
 function normalizeArabic(value: string): string {
   return String(value || '')
     .toLowerCase()
