@@ -994,6 +994,7 @@ export default async function LegalSourcesAdminPage({
                   <th style={styles.th}>Slug</th>
                   <th style={styles.th}>عدد المواد</th>
                   <th style={styles.th}>الحالة</th>
+                  <th style={styles.th}>فتح التشريع</th>
                 </tr>
               </thead>
 
@@ -1002,7 +1003,12 @@ export default async function LegalSourcesAdminPage({
                   <tr key={source.id}>
                     <td style={styles.td}>{source.country.nameAr}</td>
                     <td style={{ ...styles.td, fontWeight: 900 }}>
-                      {source.titleAr}
+                      <a
+                        href={`/admin/legal-sources/${source.id}?key=${encodeURIComponent(adminKey)}`}
+                        style={{ color: '#f8fafc', textDecoration: 'none' }}
+                      >
+                        {source.titleAr}
+                      </a>
                     </td>
                     <td style={{ ...styles.td, color: '#94a3b8' }}>
                       {source.slug}
@@ -1012,6 +1018,14 @@ export default async function LegalSourcesAdminPage({
                       <span style={styles.badge}>
                         {source.isActive ? 'فعال' : 'غير فعال'}
                       </span>
+                    </td>
+                    <td style={styles.td}>
+                      <a
+                        href={`/admin/legal-sources/${source.id}?key=${encodeURIComponent(adminKey)}`}
+                        style={styles.reviewButton}
+                      >
+                        فتح التشريع
+                      </a>
                     </td>
                   </tr>
                 ))}
