@@ -128,7 +128,7 @@ const tabs = [
   { value: 'events', label: 'التواريخ والإجراءات' },
   { value: 'recommendations', label: 'التوصيات' },
   { value: 'analysis', label: 'التحليل' },
-  { value: 'memo', label: 'المذكرة القانونية' },
+  { value: 'memo', label: 'المذكرة المحفوظة' },
 ];
 
 const caseTypeOptions = [
@@ -264,7 +264,103 @@ function buildEventDateIso(form: {
     throw new Error('التاريخ غير صحيح');
   }
 
+
   return date.toISOString();
+}
+
+function getMemoRiskLabel(value?: string | null) {
+  const normalized = String(value || '').toLowerCase();
+
+  if (normalized === 'low') return 'منخفضة';
+  if (normalized === 'medium') return 'متوسطة';
+  if (normalized === 'high') return 'عالية';
+  if (normalized === 'unknown') return 'غير محددة';
+
+  return value || 'غير محددة';
+}
+
+function getMemoRiskStyle(value?: string | null): CSSProperties {
+  const normalized = String(value || '').toLowerCase();
+
+  if (normalized === 'high') {
+    return {
+      ...styles.memoStatusPill,
+      background: 'rgba(239, 68, 68, 0.14)',
+      color: '#fecaca',
+      border: '1px solid rgba(248, 113, 113, 0.3)',
+    };
+  }
+
+  if (normalized === 'medium') {
+    return {
+      ...styles.memoStatusPill,
+      background: 'rgba(245, 158, 11, 0.14)',
+      color: '#fde68a',
+      border: '1px solid rgba(251, 191, 36, 0.28)',
+    };
+  }
+
+  if (normalized === 'low') {
+    return {
+      ...styles.memoStatusPill,
+      background: 'rgba(34, 197, 94, 0.14)',
+      color: '#bbf7d0',
+      border: '1px solid rgba(74, 222, 128, 0.28)',
+    };
+  }
+
+  return styles.memoStatusPill;
+}
+
+function formatMemoList(title: string, items?: string[] | null) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+
+  return [
+    title,
+    ...items.map((item, index) => `${index + 1}. ${item}`),
+  ].join('\n');
+}
+
+function buildCaseMemoCopyText(memo: CaseLegalMemo) {
+  const sections = [
+    memo.title || 'مذكرة قانونية أولية',
+    '',
+    'الملخص التنفيذي',
+    memo.executiveSummary || 'لا يوجد ملخص تنفيذي.',
+    '',
+    formatMemoList('الوقائع الرئيسية', memo.keyFacts),
+    '',
+    formatMemoList('المسائل القانونية', memo.legalIssues),
+    '',
+    memo.appliedArticles?.length
+      ? [
+          'المواد القانونية المستخدمة',
+          ...memo.appliedArticles.map((article, index) => {
+            const source = article.sourceTitle || 'مصدر قانوني غير محدد';
+            const number = article.articleNumber
+              ? ` - المادة ${article.articleNumber}`
+              : '';
+            const relevance = article.relevance || 'لم يتم توضيح سبب الارتباط.';
+
+            return `${index + 1}. ${source}${number}\n   سبب الارتباط: ${relevance}`;
+          }),
+        ].join('\n')
+      : '',
+    '',
+    formatMemoList('التوصيات', memo.recommendations),
+    '',
+    formatMemoList('المعلومات الناقصة', memo.missingInformation),
+    '',
+    'نص المذكرة',
+    memo.memoText || '',
+    '',
+    memo.disclaimer ||
+      'هذه مذكرة قانونية أولية لا تغني عن مراجعة محامٍ مختص قبل اتخاذ أي إجراء.',
+  ];
+
+  return sections
+    .filter((section) => typeof section === 'string' && section.trim().length > 0)
+    .join('\n\n');
 }
 
 export default function CaseDetailsPage() {
@@ -283,6 +379,7 @@ export default function CaseDetailsPage() {
   const [selectedArticle, setSelectedArticle] = useState<ArticleDetails | null>(null);
   const [articleCopied, setArticleCopied] = useState(false);
   const [caseMemo, setCaseMemo] = useState<CaseLegalMemo | null>(null);
+  const [memoLoading, setMemoLoading] = useState(false);
   const [memoError, setMemoError] = useState('');
   const [memoCopied, setMemoCopied] = useState(false);
 
@@ -339,6 +436,7 @@ export default function CaseDetailsPage() {
 
   async function loadLatestCaseMemo() {
     try {
+      setMemoLoading(true);
       setMemoError('');
 
       const res = await fetch(`/api/cases/${caseId}/memo`, {
@@ -346,17 +444,30 @@ export default function CaseDetailsPage() {
         cache: 'no-store',
       });
 
-      const json = await res.json();
+      let json: any = null;
 
-      if (!res.ok || json.success === false) {
-        throw new Error(json.error || 'فشل في جلب آخر مذكرة محفوظة');
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
       }
 
-      const savedMemo = json.data?.memo || json.data || json.memo || null;
+      if (res.status === 404) {
+        setCaseMemo(null);
+        return;
+      }
+
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.error || 'فشل في جلب آخر مذكرة محفوظة');
+      }
+
+      const savedMemo = json?.data?.memo || json?.data || json?.memo || null;
       setCaseMemo(savedMemo);
     } catch (err: any) {
       setCaseMemo(null);
       setMemoError(err.message || 'تعذر جلب آخر مذكرة قانونية محفوظة');
+    } finally {
+      setMemoLoading(false);
     }
   }
 
@@ -849,7 +960,7 @@ export default function CaseDetailsPage() {
 
       setCaseMemo(memo);
       setActiveTab('memo');
-      setSuccessMessage('تم توليد المذكرة القانونية الأولية بنجاح');
+      setSuccessMessage('تم توليد وحفظ المذكرة القانونية بنجاح');
     } catch (err: any) {
       setMemoError(err.message || 'حدث خطأ أثناء توليد المذكرة القانونية');
     } finally {
@@ -858,20 +969,20 @@ export default function CaseDetailsPage() {
   }
 
   async function copyCaseMemoText() {
-    if (!caseMemo?.memoText) {
+    if (!caseMemo) {
       setMemoError('لا توجد مذكرة قانونية لنسخها.');
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(caseMemo.memoText);
+      await navigator.clipboard.writeText(buildCaseMemoCopyText(caseMemo));
 
       setMemoCopied(true);
       setSuccessMessage('تم نسخ المذكرة القانونية بنجاح');
 
       setTimeout(() => {
         setMemoCopied(false);
-      }, 2000);
+      }, 2200);
     } catch {
       setMemoError('تعذر نسخ المذكرة. يمكنك تحديد النص ونسخه يدويًا.');
     }
@@ -1758,49 +1869,144 @@ export default function CaseDetailsPage() {
       )}
       {activeTab === 'memo' && (
         <>
-          <section style={styles.aiActionCard}>
-            <div>
-              <h2 style={styles.cardTitle}>توليد مذكرة قانونية أولية</h2>
-              <p style={styles.aiActionText}>
-                يقوم النظام ببناء مذكرة قانونية أولية اعتمادًا على بيانات القضية
-                والمستندات والإجراءات والتحليل والتوصيات والمواد القانونية المعتمدة
-                المرتبطة بالقضية.
-              </p>
+          <section style={styles.memoHeroCard}>
+            <div style={styles.memoHeroContent}>
+              <div>
+                <p style={styles.badge}>المذكرة القانونية المحفوظة</p>
+                <h2 style={styles.memoHeroTitle}>
+                  {caseMemo ? 'آخر مذكرة محفوظة لهذه القضية' : 'لا توجد مذكرة محفوظة بعد'}
+                </h2>
+                <p style={styles.aiActionText}>
+                  هذا التبويب يعرض آخر نسخة محفوظة من المذكرة القانونية. عند إعادة
+                  التوليد سيتم تحديث النسخة الحالية بناءً على بيانات القضية
+                  والمستندات والإجراءات والتحليلات والتوصيات والمواد القانونية
+                  المعتمدة.
+                </p>
+              </div>
+
+              <div style={styles.memoHeroActions}>
+                <button
+                  style={styles.aiButton}
+                  onClick={generateCaseMemo}
+                  disabled={saving === 'case-memo'}
+                >
+                  {saving === 'case-memo'
+                    ? 'جاري توليد وحفظ المذكرة...'
+                    : caseMemo
+                      ? 'إعادة توليد المذكرة'
+                      : 'توليد مذكرة قانونية'}
+                </button>
+
+                {caseMemo && (
+                  <button
+                    style={styles.copyButton}
+                    onClick={copyCaseMemoText}
+                    disabled={saving === 'case-memo'}
+                  >
+                    {memoCopied ? 'تم النسخ ✅' : 'نسخ المذكرة'}
+                  </button>
+                )}
+              </div>
             </div>
 
-            <button
-              style={styles.aiButton}
-              onClick={generateCaseMemo}
-              disabled={saving === 'case-memo'}
-            >
-              {saving === 'case-memo'
-                ? 'جاري توليد المذكرة...'
-                : 'توليد مذكرة قانونية أولية'}
-            </button>
+            <div style={styles.memoStatusGrid}>
+              <div style={styles.memoStatusCard}>
+                <span style={styles.memoStatusLabel}>حالة المذكرة</span>
+                <strong style={styles.memoStatusValue}>
+                  {saving === 'case-memo'
+                    ? 'جاري التوليد'
+                    : memoLoading
+                      ? 'جاري التحقق'
+                      : caseMemo
+                        ? 'محفوظة'
+                        : 'غير موجودة'}
+                </strong>
+              </div>
+
+              <div style={styles.memoStatusCard}>
+                <span style={styles.memoStatusLabel}>آخر حفظ</span>
+                <strong style={styles.memoStatusValue}>
+                  {caseMemo?.updatedAt || caseMemo?.createdAt
+                    ? formatDate(caseMemo.updatedAt || caseMemo.createdAt)
+                    : 'لا يوجد'}
+                </strong>
+              </div>
+
+              <div style={styles.memoStatusCard}>
+                <span style={styles.memoStatusLabel}>درجة الخطورة</span>
+                <strong style={styles.memoStatusValue}>
+                  {caseMemo ? getMemoRiskLabel(caseMemo.riskLevel) : 'غير محددة'}
+                </strong>
+              </div>
+
+              <div style={styles.memoStatusCard}>
+                <span style={styles.memoStatusLabel}>المواد القانونية</span>
+                <strong style={styles.memoStatusValue}>
+                  {caseMemo?.appliedArticles?.length || 0}
+                </strong>
+              </div>
+            </div>
           </section>
 
           {memoError && <div style={styles.errorBox}>{memoError}</div>}
 
-          {!caseMemo ? (
-            <section style={styles.card}>
-              <h2 style={styles.cardTitle}>لا توجد مذكرة مولدة بعد</h2>
+          {saving === 'case-memo' && (
+            <section style={styles.memoLoadingCard}>
+              <div style={styles.memoSpinner} />
+              <div>
+                <h3 style={styles.smallTitle}>جاري توليد المذكرة وحفظها...</h3>
+                <p style={styles.muted}>
+                  يتم الآن بناء مذكرة قانونية منظمة من بيانات القضية والمستندات
+                  والتحليل والمواد المرتبطة.
+                </p>
+              </div>
+            </section>
+          )}
+
+          {!caseMemo && saving !== 'case-memo' ? (
+            <section style={styles.emptyMemoCard}>
+              <div style={styles.emptyMemoIcon}>📝</div>
+              <h2 style={styles.cardTitle}>لا توجد مذكرة محفوظة لهذه القضية</h2>
               <p style={styles.muted}>
-                اضغط على زر توليد المذكرة القانونية الأولية لإنشاء مسودة مبنية
-                على بيانات هذه القضية. هذه المسودة لا تغني عن مراجعة محامٍ مختص.
+                اضغط على زر توليد مذكرة قانونية لإنشاء أول نسخة محفوظة. ستظهر هنا
+                بعد اكتمال التوليد، ويمكنك نسخها أو إعادة توليدها لاحقًا.
               </p>
             </section>
-          ) : (
+          ) : caseMemo ? (
             <section style={styles.memoLayout}>
               <div style={styles.card}>
                 <div style={styles.memoHeaderRow}>
                   <div>
-                    <p style={styles.badge}>مذكرة قانونية أولية</p>
+                    <div style={styles.memoPillsRow}>
+                      <span style={styles.savedMemoBadge}>محفوظة</span>
+                      <span style={getMemoRiskStyle(caseMemo.riskLevel)}>
+                        الخطورة: {getMemoRiskLabel(caseMemo.riskLevel)}
+                      </span>
+                    </div>
+
                     <h2 style={styles.cardTitle}>{caseMemo.title}</h2>
+
+                    <p style={styles.memoUpdatedText}>
+                      آخر حفظ:{' '}
+                      {caseMemo.updatedAt || caseMemo.createdAt
+                        ? formatDate(caseMemo.updatedAt || caseMemo.createdAt)
+                        : 'غير محدد'}
+                    </p>
                   </div>
 
-                  <button style={styles.copyButton} onClick={copyCaseMemoText}>
-                    {memoCopied ? 'تم النسخ ✅' : 'نسخ المذكرة'}
-                  </button>
+                  <div style={styles.memoHeaderActions}>
+                    <button style={styles.copyButton} onClick={copyCaseMemoText}>
+                      {memoCopied ? 'تم النسخ ✅' : 'نسخ كامل المذكرة'}
+                    </button>
+
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={generateCaseMemo}
+                      disabled={saving === 'case-memo'}
+                    >
+                      {saving === 'case-memo' ? 'جاري التحديث...' : 'تحديث النسخة'}
+                    </button>
+                  </div>
                 </div>
 
                 <div style={styles.memoSummaryBox}>
@@ -1811,7 +2017,7 @@ export default function CaseDetailsPage() {
                 <div style={styles.memoMetaGrid}>
                   <Info
                     label="درجة الخطورة الأولية"
-                    value={caseMemo.riskLevel || 'غير محددة'}
+                    value={getMemoRiskLabel(caseMemo.riskLevel)}
                   />
                   <Info
                     label="عدد المواد المستخدمة"
@@ -1827,7 +2033,14 @@ export default function CaseDetailsPage() {
                   />
                 </div>
 
-                <div style={styles.memoTextBox}>{caseMemo.memoText}</div>
+                <div style={styles.memoTextHeader}>
+                  <h3 style={styles.smallTitle}>نص المذكرة</h3>
+                  {memoCopied && <span style={styles.copiedInline}>تم النسخ</span>}
+                </div>
+
+                <div style={styles.memoTextBox}>
+                  {caseMemo.memoText || 'لا يوجد نص محفوظ للمذكرة.'}
+                </div>
 
                 <div style={styles.memoDisclaimer}>
                   {caseMemo.disclaimer ||
@@ -1835,8 +2048,8 @@ export default function CaseDetailsPage() {
                 </div>
               </div>
 
-              <div style={styles.card}>
-                <h2 style={styles.cardTitle}>تفاصيل المذكرة</h2>
+              <aside style={styles.card}>
+                <h2 style={styles.cardTitle}>ملخص محتوى المذكرة</h2>
 
                 <RenderList title="الوقائع الرئيسية" items={caseMemo.keyFacts} />
                 <RenderList
@@ -1872,9 +2085,14 @@ export default function CaseDetailsPage() {
                     </div>
                   </div>
                 )}
-              </div>
+
+                <div style={styles.memoSideNote}>
+                  النسخة الحالية هي آخر مذكرة محفوظة. في مرحلة لاحقة يمكن إضافة سجل
+                  إصدارات للمذكرات السابقة.
+                </div>
+              </aside>
             </section>
-          )}
+          ) : null}
         </>
       )}
 
@@ -2354,6 +2572,97 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     whiteSpace: 'nowrap',
   },
+
+  memoHeroCard: {
+    background:
+      'linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98))',
+    border: '1px solid #334155',
+    borderRadius: '24px',
+    padding: '26px',
+    marginBottom: '22px',
+    boxShadow: '0 24px 80px rgba(0,0,0,0.32)',
+  },
+  memoHeroContent: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '22px',
+    marginBottom: '22px',
+  },
+  memoHeroTitle: {
+    margin: 0,
+    marginBottom: '12px',
+    color: '#ffffff',
+    fontSize: '28px',
+    fontWeight: 900,
+    lineHeight: 1.45,
+  },
+  memoHeroActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+  memoStatusGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '12px',
+  },
+  memoStatusCard: {
+    background: 'rgba(15, 23, 42, 0.88)',
+    border: '1px solid #243244',
+    borderRadius: '16px',
+    padding: '16px',
+  },
+  memoStatusLabel: {
+    display: 'block',
+    color: '#94a3b8',
+    fontSize: '13px',
+    marginBottom: '8px',
+  },
+  memoStatusValue: {
+    display: 'block',
+    color: '#ffffff',
+    fontSize: '15px',
+    lineHeight: 1.6,
+  },
+  memoLoadingCard: {
+    background: '#111827',
+    border: '1px solid #243244',
+    borderRadius: '18px',
+    padding: '18px',
+    marginBottom: '22px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px',
+  },
+  memoSpinner: {
+    width: '18px',
+    height: '18px',
+    borderRadius: '999px',
+    border: '3px solid rgba(147, 197, 253, 0.25)',
+    borderTopColor: '#93c5fd',
+  },
+  emptyMemoCard: {
+    background: '#111827',
+    border: '1px dashed #334155',
+    borderRadius: '22px',
+    padding: '34px',
+    textAlign: 'center',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
+  },
+  emptyMemoIcon: {
+    width: '58px',
+    height: '58px',
+    borderRadius: '18px',
+    display: 'grid',
+    placeItems: 'center',
+    background: '#0f172a',
+    border: '1px solid #243244',
+    margin: '0 auto 18px',
+    fontSize: '26px',
+  },
   memoLayout: {
     display: 'grid',
     gridTemplateColumns: '1fr 430px',
@@ -2366,6 +2675,44 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'flex-start',
     gap: '18px',
     marginBottom: '18px',
+  },
+
+  memoPillsRow: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap',
+    marginBottom: '12px',
+  },
+  savedMemoBadge: {
+    display: 'inline-block',
+    background: 'rgba(34, 197, 94, 0.14)',
+    color: '#bbf7d0',
+    border: '1px solid rgba(74, 222, 128, 0.28)',
+    borderRadius: '999px',
+    padding: '6px 11px',
+    fontSize: '13px',
+    fontWeight: 800,
+  },
+  memoStatusPill: {
+    display: 'inline-block',
+    background: 'rgba(148, 163, 184, 0.12)',
+    color: '#cbd5e1',
+    border: '1px solid rgba(148, 163, 184, 0.24)',
+    borderRadius: '999px',
+    padding: '6px 11px',
+    fontSize: '13px',
+    fontWeight: 800,
+  },
+  memoUpdatedText: {
+    color: '#94a3b8',
+    margin: '-8px 0 0',
+    fontSize: '13px',
+  },
+  memoHeaderActions: {
+    display: 'flex',
+    gap: '10px',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
   memoSummaryBox: {
     background: '#0f172a',
@@ -2393,6 +2740,23 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '16px',
     textAlign: 'right',
   },
+
+  memoTextHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '10px',
+  },
+  copiedInline: {
+    background: 'rgba(34, 197, 94, 0.14)',
+    color: '#bbf7d0',
+    border: '1px solid rgba(74, 222, 128, 0.28)',
+    borderRadius: '999px',
+    padding: '5px 10px',
+    fontSize: '12px',
+    fontWeight: 800,
+  },
   memoDisclaimer: {
     marginTop: '16px',
     background: 'rgba(245, 158, 11, 0.12)',
@@ -2413,6 +2777,28 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     whiteSpace: 'nowrap',
     fontWeight: 700,
+  },
+
+  secondaryButton: {
+    background: '#0f172a',
+    color: '#cbd5e1',
+    border: '1px solid #334155',
+    borderRadius: '12px',
+    padding: '10px 14px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    fontWeight: 700,
+  },
+  memoSideNote: {
+    marginTop: '18px',
+    background: 'rgba(59, 130, 246, 0.1)',
+    color: '#bfdbfe',
+    border: '1px solid rgba(147, 197, 253, 0.2)',
+    borderRadius: '14px',
+    padding: '13px 14px',
+    lineHeight: 1.8,
+    fontSize: '13px',
   },
   twoColumnSection: {
     display: 'grid',
