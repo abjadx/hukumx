@@ -859,8 +859,8 @@ export async function POST(req: NextRequest) {
         legalSourceId: legalSource.id,
         articleNumber: article.articleNumber,
         articleText: article.articleText,
-        articleTextClean: article.articleText,
-        articleTextReviewed: article.articleText,
+        articleTextClean: null,
+        articleTextReviewed: null,
         reviewStatus: 'needs_review',
         reviewNotes: [
           `تم إدخال هذه المادة من ملف ${fileValue.name}.`,

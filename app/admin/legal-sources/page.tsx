@@ -442,7 +442,7 @@ async function suggestAiReviewedArticlesBatch(formData: FormData) {
           id: article.id,
         },
         data: {
-          articleTextReviewed: suggestedText,
+          articleTextClean: suggestedText,
           reviewStatus: 'needs_review',
           reviewNotes,
           reviewedAt: null,

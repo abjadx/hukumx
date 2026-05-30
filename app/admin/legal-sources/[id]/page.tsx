@@ -33,6 +33,73 @@ function getSingleParam(value?: string | string[]) {
   return value || '';
 }
 
+function normalizeTextForCompare(value?: string | null) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getMeaningfulProcessedText(article: SourceArticle) {
+  const original = normalizeTextForCompare(article.articleText);
+  const clean = normalizeTextForCompare(article.articleTextClean);
+
+  if (clean && clean !== original) {
+    return article.articleTextClean || '';
+  }
+
+  // دعم بيانات قديمة كان نص AI محفوظًا فيها في articleTextReviewed قبل الاعتماد
+  const legacyAiText = normalizeTextForCompare(article.articleTextReviewed);
+  if (
+    article.reviewStatus !== 'approved' &&
+    legacyAiText &&
+    legacyAiText !== original
+  ) {
+    return article.articleTextReviewed || '';
+  }
+
+  return '';
+}
+
+function getDisplayArticleText(article: SourceArticle) {
+  if (
+    article.reviewStatus === 'approved' &&
+    article.articleTextReviewed &&
+    article.articleTextReviewed.trim()
+  ) {
+    return article.articleTextReviewed;
+  }
+
+  const processedText = getMeaningfulProcessedText(article);
+  if (processedText.trim()) return processedText;
+
+  return 'لم يتم توليد نص معالج بالذكاء الصناعي لهذه المادة بعد. افتح المادة من زر المراجعة لتوليد نص معالج أو اعتماد النص يدويًا.';
+}
+
+function isDisplayMissingProcessedText(article: SourceArticle) {
+  if (article.reviewStatus === 'approved' && article.articleTextReviewed?.trim()) {
+    return false;
+  }
+
+  return !getMeaningfulProcessedText(article).trim();
+}
+
+function trimText(value: string, maxLength = 360) {
+  const normalized = value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength).trim()}...`;
+}
+
 function convertArabicDigits(value: string) {
   const map: Record<string, string> = {
     '٠': '0',
@@ -70,31 +137,6 @@ function compareArticleNumbers(a: string, b: string) {
 
   if (numberA !== numberB) return numberA - numberB;
   return a.localeCompare(b, 'ar', { numeric: true });
-}
-
-function getBestArticleText(article: SourceArticle) {
-  if (
-    article.reviewStatus === 'approved' &&
-    article.articleTextReviewed &&
-    article.articleTextReviewed.trim()
-  ) {
-    return article.articleTextReviewed;
-  }
-
-  return article.articleTextClean || article.articleTextReviewed || article.articleText;
-}
-
-function trimText(value: string, maxLength = 360) {
-  const normalized = value
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
-    .replace(/\u00a0/g, ' ')
-    .replace(/[ \t]+/g, ' ')
-    .trim();
-
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength).trim()}...`;
 }
 
 function getStatusLabel(status: string) {
@@ -325,8 +367,24 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '12px',
     fontWeight: 900,
   },
+  warningBadge: {
+    border: '1px solid rgba(251, 191, 36, 0.45)',
+    background: 'rgba(251, 191, 36, 0.12)',
+    color: '#fde68a',
+    borderRadius: '999px',
+    padding: '6px 12px',
+    fontSize: '12px',
+    fontWeight: 900,
+  },
   articleText: {
     color: '#e2e8f0',
+    fontSize: '15px',
+    lineHeight: 2,
+    margin: 0,
+    whiteSpace: 'pre-line',
+  },
+  warningText: {
+    color: '#fde68a',
     fontSize: '15px',
     lineHeight: 2,
     margin: 0,
@@ -441,6 +499,9 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
             {source.country.nameAr} — Slug: {source.slug}
             {source.fileName ? ` — الملف: ${source.fileName}` : ''}
           </p>
+          <p style={{ ...styles.subtitle, fontSize: '14px' }}>
+            شاشة التشريع تعرض النص المعتمد فقط إذا كان موجودًا. وإذا لم تعتمد المادة بعد، تعرض النص المعالج بالذكاء الصناعي. النص الأصلي لا يظهر هنا، ويظهر فقط داخل شاشة مراجعة المادة.
+          </p>
         </section>
 
         <section style={styles.statsGrid}>
@@ -481,14 +542,18 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
           </form>
 
           {filteredArticles.map((article) => {
-            const fullText = getBestArticleText(article);
-            const reviewHref = `/admin/legal-sources/review?${keyQuery}&articleId=${encodeURIComponent(article.id)}`;
+            const fullText = getDisplayArticleText(article);
+            const missingProcessedText = isDisplayMissingProcessedText(article);
+            const reviewHref = `/admin/legal-sources/review?${keyQuery}&articleId=${encodeURIComponent(
+              article.id
+            )}&sourceId=${encodeURIComponent(source.id)}`;
 
             return (
               <article key={article.id} style={styles.articleCard}>
                 <div style={styles.articleHeader}>
                   <span style={styles.articleNumber}>المادة {article.articleNumber}</span>
                   {article.reviewStatus === 'approved' && <span style={styles.approvedBadge}>نص معتمد</span>}
+                  {missingProcessedText && <span style={styles.warningBadge}>لا يوجد نص معالج</span>}
                   <span style={styles.statusBadge}>{getStatusLabel(article.reviewStatus)}</span>
                   <span style={{ color: '#94a3b8', fontSize: '13px' }}>
                     آخر تحديث: {formatDate(article.updatedAt)}
@@ -498,7 +563,9 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
                   </Link>
                 </div>
 
-                <p style={styles.articleText}>{trimText(fullText)}</p>
+                <p style={missingProcessedText ? styles.warningText : styles.articleText}>
+                  {trimText(fullText)}
+                </p>
 
                 <details
                   style={{
@@ -516,9 +583,11 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
                       marginBottom: '12px',
                     }}
                   >
-                    عرض المادة كاملة
+                    عرض النص الظاهر كاملًا
                   </summary>
-                  <p style={{ ...styles.articleText, marginTop: '12px' }}>{fullText}</p>
+                  <p style={{ ...(missingProcessedText ? styles.warningText : styles.articleText), marginTop: '12px' }}>
+                    {fullText}
+                  </p>
                   {article.reviewNotes && (
                     <p style={{ color: '#94a3b8', lineHeight: 1.9, marginTop: '16px', whiteSpace: 'pre-line' }}>
                       ملاحظات المراجعة:\n{article.reviewNotes}

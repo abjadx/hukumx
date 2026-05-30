@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import OpenAI from 'openai';
 import { prisma } from '../../../lib/prisma';
@@ -17,8 +18,28 @@ type PageProps = {
   searchParams?: Promise<{
     key?: string | string[];
     article?: string | string[];
+    articleId?: string | string[];
+    sourceId?: string | string[];
     saved?: string | string[];
   }>;
+};
+
+type ReviewArticle = {
+  id: string;
+  legalSourceId: string;
+  articleNumber: string;
+  articleText: string;
+  articleTextClean: string | null;
+  articleTextReviewed: string | null;
+  reviewStatus: string;
+  reviewNotes: string | null;
+  legalSource: {
+    id: string;
+    titleAr: string;
+    country: {
+      nameAr: string;
+    };
+  };
 };
 
 function getSingleParam(value?: string | string[]) {
@@ -26,29 +47,114 @@ function getSingleParam(value?: string | string[]) {
   return value || '';
 }
 
-function compareArticleNumbers(a: string, b: string) {
-  const numberA = Number(a);
-  const numberB = Number(b);
-
-  if (Number.isFinite(numberA) && Number.isFinite(numberB)) {
-    return numberA - numberB;
-  }
-
-  return a.localeCompare(b, 'ar');
+function normalizeTextForCompare(value?: string | null) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-async function getNextNeedsReviewArticleNumber(currentArticleNumber: string, currentArticleId: string) {
+function getMeaningfulProcessedText(article: {
+  articleText: string;
+  articleTextClean: string | null;
+  articleTextReviewed: string | null;
+  reviewStatus: string;
+}) {
+  const original = normalizeTextForCompare(article.articleText);
+  const clean = normalizeTextForCompare(article.articleTextClean);
+
+  if (clean && clean !== original) {
+    return article.articleTextClean || '';
+  }
+
+  // دعم البيانات القديمة التي كان النظام يحفظ فيها نص AI داخل articleTextReviewed قبل الاعتماد
+  const legacyAiText = normalizeTextForCompare(article.articleTextReviewed);
+  if (
+    article.reviewStatus !== 'approved' &&
+    legacyAiText &&
+    legacyAiText !== original
+  ) {
+    return article.articleTextReviewed || '';
+  }
+
+  return '';
+}
+
+function getInitialEditableText(article: ReviewArticle) {
+  if (article.reviewStatus === 'approved' && article.articleTextReviewed?.trim()) {
+    return article.articleTextReviewed;
+  }
+
+  const processedText = getMeaningfulProcessedText(article);
+  if (processedText.trim()) return processedText;
+
+  return article.articleText;
+}
+
+function convertArabicDigits(value: string) {
+  const map: Record<string, string> = {
+    '٠': '0',
+    '١': '1',
+    '٢': '2',
+    '٣': '3',
+    '٤': '4',
+    '٥': '5',
+    '٦': '6',
+    '٧': '7',
+    '٨': '8',
+    '٩': '9',
+  };
+
+  return value.replace(/[٠-٩]/g, (digit) => map[digit] || digit);
+}
+
+function getArticleNumberValue(value: string) {
+  const normalized = convertArabicDigits(value)
+    .replace(/^المادة\s*/u, '')
+    .replace(/^مادة\s*/u, '')
+    .replace(/[^0-9.\-]/g, '')
+    .trim();
+
+  const directNumber = Number(normalized);
+  if (Number.isFinite(directNumber)) return directNumber;
+
+  const firstNumber = Number(normalized.match(/\d+/)?.[0] || '');
+  return Number.isFinite(firstNumber) ? firstNumber : Number.MAX_SAFE_INTEGER;
+}
+
+function compareArticleNumbers(a: string, b: string) {
+  const numberA = getArticleNumberValue(a);
+  const numberB = getArticleNumberValue(b);
+
+  if (numberA !== numberB) return numberA - numberB;
+  return a.localeCompare(b, 'ar', { numeric: true });
+}
+
+function getReviewStatusLabel(status: string) {
+  if (status === 'approved') return 'معتمدة';
+  if (status === 'needs_review') return 'تحتاج مراجعة';
+  if (status === 'pending') return 'غير مراجعة';
+  return status || 'غير مراجعة';
+}
+
+async function getNextNeedsReviewArticleId(
+  currentArticleNumber: string,
+  currentArticleId: string,
+  legalSourceId: string
+) {
   const needsReviewArticles = await prisma.legalArticle.findMany({
     where: {
+      legalSourceId,
       reviewStatus: 'needs_review',
-      legalSource: {
-        isActive: true,
-      },
       NOT: {
         id: currentArticleId,
       },
     },
     select: {
+      id: true,
       articleNumber: true,
     },
   });
@@ -57,11 +163,12 @@ async function getNextNeedsReviewArticleNumber(currentArticleNumber: string, cur
     compareArticleNumbers(a.articleNumber, b.articleNumber)
   );
 
-  const nextArticle = sortedArticles.find(
-    (item) => compareArticleNumbers(item.articleNumber, currentArticleNumber) > 0
-  ) || sortedArticles[0];
+  const nextArticle =
+    sortedArticles.find(
+      (item) => compareArticleNumbers(item.articleNumber, currentArticleNumber) > 0
+    ) || sortedArticles[0];
 
-  return nextArticle?.articleNumber || '';
+  return nextArticle?.id || '';
 }
 
 function extractOutputText(response: unknown): string {
@@ -117,7 +224,6 @@ async function saveReviewedArticle(formData: FormData) {
   }
 
   const articleId = String(formData.get('articleId') || '');
-  const articleNumber = String(formData.get('articleNumber') || '');
   const reviewedText = String(formData.get('reviewedText') || '').trim();
   const reviewNotes = String(formData.get('reviewNotes') || '').trim();
   const action = String(formData.get('action') || 'save');
@@ -126,39 +232,71 @@ async function saveReviewedArticle(formData: FormData) {
     throw new Error('Missing article data');
   }
 
-  const reviewStatus =
-    action === 'approve' || action === 'approve_next'
-      ? 'approved'
-      : action === 'needs_review'
-        ? 'needs_review'
-        : 'pending';
-
-  await prisma.legalArticle.update({
+  const article = await prisma.legalArticle.findUnique({
     where: {
       id: articleId,
     },
-    data: {
-      articleTextReviewed: reviewedText,
-      reviewStatus,
-      reviewNotes: reviewNotes || null,
-      reviewedAt: reviewStatus === 'approved' ? new Date() : null,
-      reviewedBy: reviewStatus === 'approved' ? 'admin' : null,
+    select: {
+      id: true,
+      articleNumber: true,
+      legalSourceId: true,
     },
   });
 
-  if (action === 'approve_next') {
-    const nextArticleNumber = await getNextNeedsReviewArticleNumber(articleNumber, articleId);
+  if (!article) {
+    throw new Error('Article not found');
+  }
 
-    if (nextArticleNumber) {
+  const isApproveAction = action === 'approve' || action === 'approve_next';
+
+  if (isApproveAction) {
+    await prisma.legalArticle.update({
+      where: {
+        id: articleId,
+      },
+      data: {
+        articleTextReviewed: reviewedText,
+        reviewStatus: 'approved',
+        reviewNotes: reviewNotes || null,
+        reviewedAt: new Date(),
+        reviewedBy: 'admin',
+      },
+    });
+  } else {
+    await prisma.legalArticle.update({
+      where: {
+        id: articleId,
+      },
+      data: {
+        // حفظ بدون اعتماد يعني تحديث طبقة المعالجة فقط، وليس النص المعتمد
+        articleTextClean: reviewedText,
+        reviewStatus: 'needs_review',
+        reviewNotes: reviewNotes || null,
+        reviewedAt: null,
+        reviewedBy: null,
+      },
+    });
+  }
+
+  if (action === 'approve_next') {
+    const nextArticleId = await getNextNeedsReviewArticleId(
+      article.articleNumber,
+      article.id,
+      article.legalSourceId
+    );
+
+    if (nextArticleId) {
       redirect(
         `/admin/legal-sources/review?key=${encodeURIComponent(
           adminKey
-        )}&article=${encodeURIComponent(nextArticleNumber)}&saved=1`
+        )}&articleId=${encodeURIComponent(nextArticleId)}&sourceId=${encodeURIComponent(
+          article.legalSourceId
+        )}&saved=1`
       );
     }
 
     redirect(
-      `/admin/legal-sources?key=${encodeURIComponent(
+      `/admin/legal-sources/${encodeURIComponent(article.legalSourceId)}?key=${encodeURIComponent(
         adminKey
       )}&status=needs_review&saved=review-finished`
     );
@@ -167,7 +305,9 @@ async function saveReviewedArticle(formData: FormData) {
   redirect(
     `/admin/legal-sources/review?key=${encodeURIComponent(
       adminKey
-    )}&article=${encodeURIComponent(articleNumber)}&saved=1`
+    )}&articleId=${encodeURIComponent(article.id)}&sourceId=${encodeURIComponent(
+      article.legalSourceId
+    )}&saved=1`
   );
 }
 
@@ -186,7 +326,6 @@ async function suggestAiReviewedArticle(formData: FormData) {
   }
 
   const articleId = String(formData.get('articleId') || '');
-  const articleNumber = String(formData.get('articleNumber') || '');
 
   if (!articleId) {
     throw new Error('Missing article id');
@@ -210,8 +349,7 @@ async function suggestAiReviewedArticle(formData: FormData) {
   }
 
   const sourceText =
-    article.articleTextReviewed ||
-    article.articleTextClean ||
+    getMeaningfulProcessedText(article) ||
     article.articleText;
 
   const response = await openai.responses.create({
@@ -237,25 +375,6 @@ async function suggestAiReviewedArticle(formData: FormData) {
 9. عدم تلخيص النص.
 10. عدم إعادة صياغة النص بأسلوب جديد إلا إذا كان ذلك ضروريًا لإصلاح خطأ OCR واضح.
 
-أمثلة يجب فهمها كسياق لا كقائمة حصرية:
-- إال ← إلا
-- االلكترونية ← الإلكترونية أو الالكترونية حسب نمط النص
-- االإلكترونية ← الإلكترونية
-- اآلتية ← الآتية أو الاتية
-- بالاستالم ← بالاستلام
-- استالم ← استلام
-- كال العنوانين ← كلا العنوانين
-- مذيال ← مذيلاً
-- محيال ← محيلاً
-- مذيال باسمه ← مذيلاً باسمه
-- إخالله ← إخلاله
-- إلجراء ← لإجراء
-- لألصول ← للأصول
-- تبليغة ← تبليغه إذا كان السياق عن التبليغ
-- عليه باستخدام ← عليه باستخدام
-- العنوانين ← العنوانين إذا المقصود مثنى، أو العنوانين كما وردت إن كانت قانونيًا صحيحة
-- إذا ظهرت كلمة بلا معنى أو غريبة في سياق القانون، فاستنتج أقرب كلمة قانونية صحيحة من السياق.
-
 قواعد مهمة:
 - إذا كانت الكلمة بلا معنى أو غير مناسبة للسياق القانوني، صححها لأقرب كلمة قانونية صحيحة.
 - إذا كان التصحيح واضحًا من السياق، صححه.
@@ -280,7 +399,7 @@ async function suggestAiReviewedArticle(formData: FormData) {
 الدولة: ${article.legalSource.country.nameAr}
 رقم المادة: ${article.articleNumber}
 
-النص التالي مادة قانونية مستخرجة من PDF/OCR، وفيها أخطاء كثيرة قد تكون:
+النص التالي مادة قانونية مستخرجة من PDF/OCR، وفيها أخطاء قد تكون:
 - انقلاب حروف
 - كلمات بلا معنى
 - كلمات صحيحة ظاهريًا لكنها خطأ في السياق
@@ -354,7 +473,7 @@ ${sourceText}
       : [];
 
     reviewNotes = [
-      'تم توليد نسخة مقترحة بالذكاء الصناعي. تحتاج مراجعة واعتماد بشري قبل استخدامها كنص نهائي.',
+      'تم توليد نسخة معالجة بالذكاء الصناعي. تحتاج مراجعة واعتماد بشري قبل استخدامها كنص نهائي.',
       detectedIssues.length
         ? `الأخطاء المكتشفة: ${detectedIssues.join(' | ')}`
         : '',
@@ -367,7 +486,7 @@ ${sourceText}
   } catch {
     suggestedText = outputText;
     reviewNotes =
-      'تم توليد نسخة مقترحة بالذكاء الصناعي، لكن لم يتمكن النظام من قراءة تقرير التصحيح بصيغة منظمة.';
+      'تم توليد نسخة معالجة بالذكاء الصناعي، لكن لم يتمكن النظام من قراءة تقرير التصحيح بصيغة منظمة.';
   }
 
   if (!suggestedText) {
@@ -379,7 +498,8 @@ ${sourceText}
       id: articleId,
     },
     data: {
-      articleTextReviewed: suggestedText,
+      // الذكاء الصناعي يحدّث طبقة المعالجة فقط
+      articleTextClean: suggestedText,
       reviewStatus: 'needs_review',
       reviewNotes,
       reviewedAt: null,
@@ -390,7 +510,9 @@ ${sourceText}
   redirect(
     `/admin/legal-sources/review?key=${encodeURIComponent(
       adminKey
-    )}&article=${encodeURIComponent(articleNumber)}&saved=ai`
+    )}&articleId=${encodeURIComponent(article.id)}&sourceId=${encodeURIComponent(
+      article.legalSourceId
+    )}&saved=ai`
   );
 }
 
@@ -405,7 +527,7 @@ const styles: Record<string, CSSProperties> = {
     fontFamily: 'Arial, Helvetica, sans-serif',
   },
   container: {
-    maxWidth: '1180px',
+    maxWidth: '1280px',
     margin: '0 auto',
   },
   card: {
@@ -427,6 +549,7 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '32px',
     fontWeight: 900,
     margin: 0,
+    lineHeight: 1.6,
   },
   subtitle: {
     color: '#cbd5e1',
@@ -471,6 +594,18 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '16px',
     lineHeight: 2,
     whiteSpace: 'pre-line',
+    minHeight: '260px',
+  },
+  warningText: {
+    border: '1px solid rgba(251, 191, 36, 0.35)',
+    background: 'rgba(251, 191, 36, 0.08)',
+    borderRadius: '18px',
+    padding: '18px',
+    color: '#fde68a',
+    fontSize: '15px',
+    lineHeight: 2,
+    whiteSpace: 'pre-line',
+    minHeight: '120px',
   },
   button: {
     border: 'none',
@@ -481,6 +616,10 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 900,
     cursor: 'pointer',
     fontSize: '14px',
+    textDecoration: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   secondaryButton: {
     border: '1px solid rgba(148, 163, 184, 0.35)',
@@ -491,6 +630,10 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 900,
     cursor: 'pointer',
     fontSize: '14px',
+    textDecoration: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dangerButton: {
     border: '1px solid rgba(248, 113, 113, 0.45)',
@@ -514,8 +657,9 @@ const styles: Record<string, CSSProperties> = {
   },
   row: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
+    gridTemplateColumns: '1fr 1fr 1fr',
     gap: '18px',
+    alignItems: 'start',
   },
   formRow: {
     display: 'flex',
@@ -557,6 +701,8 @@ const styles: Record<string, CSSProperties> = {
 export default async function ArticleReviewPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const adminKey = getSingleParam(params?.key);
+  const articleId = getSingleParam(params?.articleId).trim();
+  const sourceId = getSingleParam(params?.sourceId).trim();
   const articleNumber = getSingleParam(params?.article).trim();
   const saved = getSingleParam(params?.saved);
 
@@ -601,13 +747,10 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
     );
   }
 
-  const article = articleNumber
-    ? await prisma.legalArticle.findFirst({
+  const article = articleId
+    ? await prisma.legalArticle.findUnique({
         where: {
-          articleNumber,
-          legalSource: {
-            isActive: true,
-          },
+          id: articleId,
         },
         include: {
           legalSource: {
@@ -617,16 +760,45 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
           },
         },
       })
-    : null;
+    : articleNumber
+      ? await prisma.legalArticle.findFirst({
+          where: {
+            articleNumber,
+            ...(sourceId
+              ? { legalSourceId: sourceId }
+              : {
+                  legalSource: {
+                    isActive: true,
+                  },
+                }),
+          },
+          include: {
+            legalSource: {
+              include: {
+                country: true,
+              },
+            },
+          },
+        })
+      : null;
 
-  const editableText =
-    article?.articleTextReviewed ||
-    article?.articleTextClean ||
-    article?.articleText ||
-    '';
+  const typedArticle = article as ReviewArticle | null;
+  const processedText = typedArticle ? getMeaningfulProcessedText(typedArticle) : '';
+  const editableText = typedArticle ? getInitialEditableText(typedArticle) : '';
+  const backToSourceHref = typedArticle
+    ? `/admin/legal-sources/${encodeURIComponent(
+        typedArticle.legalSourceId
+      )}?key=${encodeURIComponent(adminKey)}`
+    : sourceId
+      ? `/admin/legal-sources/${encodeURIComponent(sourceId)}?key=${encodeURIComponent(adminKey)}`
+      : `/admin/legal-sources?key=${encodeURIComponent(adminKey)}`;
 
-  const nextReviewArticleNumber = article
-    ? await getNextNeedsReviewArticleNumber(article.articleNumber, article.id)
+  const nextReviewArticleId = typedArticle
+    ? await getNextNeedsReviewArticleId(
+        typedArticle.articleNumber,
+        typedArticle.id,
+        typedArticle.legalSourceId
+      )
     : '';
 
   return (
@@ -636,8 +808,8 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
           <p style={styles.label}>Hukumx Admin</p>
           <h1 style={styles.title}>مراجعة وتعديل مادة قانونية</h1>
           <p style={styles.subtitle}>
-            هذه الصفحة مخصصة لاعتماد النص القانوني بعد مراجعته. النص المعتمد هو
-            الذي سيظهر للمستخدم بدل النص المستخرج تلقائيًا.
+            تعتمد هذه الصفحة على رقم تعريف المادة الداخلي حتى لا يحدث خلط بين مواد
+            لها نفس الرقم في تشريعات مختلفة.
           </p>
 
           <div
@@ -648,46 +820,25 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
               marginTop: '18px',
             }}
           >
-            <a
-              href={`/admin/legal-sources?key=${encodeURIComponent(adminKey)}`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: '1px solid rgba(148, 163, 184, 0.35)',
-                background: '#1e293b',
-                color: '#f8fafc',
-                borderRadius: '16px',
-                padding: '14px 22px',
-                fontWeight: 900,
-                fontSize: '14px',
-                textDecoration: 'none',
-              }}
-            >
-              العودة إلى الشاشة الرئيسية
-            </a>
+            <Link href={`/admin/legal-sources?key=${encodeURIComponent(adminKey)}`} style={styles.secondaryButton}>
+              العودة إلى كل التشريعات
+            </Link>
 
-            {nextReviewArticleNumber && (
-              <a
+            <Link href={backToSourceHref} style={styles.secondaryButton}>
+              العودة إلى التشريع
+            </Link>
+
+            {nextReviewArticleId && typedArticle && (
+              <Link
                 href={`/admin/legal-sources/review?key=${encodeURIComponent(
                   adminKey
-                )}&article=${encodeURIComponent(nextReviewArticleNumber)}`}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  border: '1px solid rgba(96, 165, 250, 0.45)',
-                  background: 'rgba(37, 99, 235, 0.22)',
-                  color: '#bfdbfe',
-                  borderRadius: '16px',
-                  padding: '14px 22px',
-                  fontWeight: 900,
-                  fontSize: '14px',
-                  textDecoration: 'none',
-                }}
+                )}&articleId=${encodeURIComponent(nextReviewArticleId)}&sourceId=${encodeURIComponent(
+                  typedArticle.legalSourceId
+                )}`}
+                style={styles.nextButton}
               >
                 المادة التالية التي تحتاج مراجعة
-              </a>
+              </Link>
             )}
           </div>
         </section>
@@ -698,14 +849,14 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
 
         {saved === 'ai' && (
           <div style={styles.success}>
-            تم توليد نص مقترح بالذكاء الصناعي. راجع النص ثم اضغط حفظ واعتماد
-            المادة.
+            تم توليد نص معالج بالذكاء الصناعي. راجع النص ثم اضغط حفظ واعتماد المادة.
           </div>
         )}
 
         <section style={styles.card}>
           <form method="GET" style={styles.formRow}>
             <input name="key" type="hidden" value={adminKey} />
+            {sourceId && <input name="sourceId" type="hidden" value={sourceId} />}
 
             <input
               name="article"
@@ -720,13 +871,14 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
           </form>
         </section>
 
-        {articleNumber && !article && (
+        {(articleId || articleNumber) && !typedArticle && (
           <div style={styles.error}>
-            لم يتم العثور على المادة رقم {articleNumber}.
+            لم يتم العثور على المادة المطلوبة. ارجع إلى صفحة التشريع واضغط زر
+            مراجعة المادة من نفس البطاقة.
           </div>
         )}
 
-        {article && (
+        {typedArticle && (
           <>
             <section style={styles.card}>
               <div
@@ -740,36 +892,43 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
               >
                 <div>
                   <p style={styles.label}>
-                    {article.legalSource.country.nameAr} —{' '}
-                    {article.legalSource.titleAr}
+                    {typedArticle.legalSource.country.nameAr} —{' '}
+                    {typedArticle.legalSource.titleAr}
                   </p>
 
                   <h2 style={{ ...styles.title, fontSize: 26 }}>
-                    المادة {article.articleNumber}
+                    المادة {typedArticle.articleNumber}
                   </h2>
                 </div>
 
                 <span style={styles.statusBadge}>
-                  الحالة: {article.reviewStatus}
+                  الحالة: {getReviewStatusLabel(typedArticle.reviewStatus)}
                 </span>
               </div>
             </section>
 
             <form action={saveReviewedArticle}>
               <input name="key" type="hidden" value={adminKey} />
-              <input name="articleId" type="hidden" value={article.id} />
-              <input
-                name="articleNumber"
-                type="hidden"
-                value={article.articleNumber}
-              />
+              <input name="articleId" type="hidden" value={typedArticle.id} />
 
               <section style={styles.row}>
                 <div style={styles.card}>
-                  <p style={styles.label}>النص الأصلي / المستخرج</p>
+                  <p style={styles.label}>النص كما استخرج من الملف</p>
                   <div style={styles.readonlyText}>
-                    {article.articleTextClean || article.articleText}
+                    {typedArticle.articleText}
                   </div>
+                </div>
+
+                <div style={styles.card}>
+                  <p style={styles.label}>النص المعالج بالذكاء الصناعي</p>
+                  {processedText ? (
+                    <div style={styles.readonlyText}>{processedText}</div>
+                  ) : (
+                    <div style={styles.warningText}>
+                      لم يتم توليد نص معالج بالذكاء الصناعي لهذه المادة بعد.
+                      يمكنك الضغط على زر "اقتراح نص مصحح بالذكاء الصناعي" في الأسفل.
+                    </div>
+                  )}
                 </div>
 
                 <div style={styles.card}>
@@ -789,7 +948,7 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
 
                 <textarea
                   name="reviewNotes"
-                  defaultValue={article.reviewNotes || ''}
+                  defaultValue={typedArticle.reviewNotes || ''}
                   placeholder="مثال: تم تصحيح أخطاء OCR في الكلمات..."
                   style={{
                     ...styles.textarea,
@@ -835,7 +994,7 @@ export default async function ArticleReviewPage({ searchParams }: PageProps) {
                     value="save"
                     style={styles.secondaryButton}
                   >
-                    حفظ بدون اعتماد
+                    حفظ معالجة بدون اعتماد
                   </button>
 
                   <button
