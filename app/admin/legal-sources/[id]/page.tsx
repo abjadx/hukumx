@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import type { CSSProperties } from 'react';
 import { prisma } from '../../../lib/prisma';
 import DeleteLegalSourceButton from '../../../components/DeleteLegalSourceButton';
+import LegalSourceAiProcessAllButton from '../../../components/LegalSourceAiProcessAllButton';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -711,6 +712,7 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
   const approvedCount = allArticles.filter((article) => article.reviewStatus === 'approved').length;
   const needsReviewCount = allArticles.filter((article) => article.reviewStatus === 'needs_review').length;
   const pendingCount = allArticles.filter((article) => article.reviewStatus === 'pending').length;
+  const unprocessedAiCount = allArticles.filter((article) => !article.articleTextClean?.trim()).length;
 
   const filteredArticles = allArticles
     .filter((article) => {
@@ -745,6 +747,11 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
           <Link href={`/admin/legal-sources?${keyQuery}`} style={styles.button}>كل التشريعات</Link>
           <Link href={`/admin/legal-sources/import?${keyQuery}`} style={styles.primaryButton}>إدخال تشريع جديد</Link>
           <Link href={reimportHref} style={styles.primaryButton}>إعادة إدخال هذا التشريع</Link>
+          <LegalSourceAiProcessAllButton
+            sourceId={source.id}
+            adminKey={adminKey}
+            initialPendingCount={unprocessedAiCount}
+          />
           <form action={processLegalSourceArticlesBatch} style={{ margin: 0 }}>
             <input name="key" type="hidden" value={adminKey} />
             <input name="sourceId" type="hidden" value={source.id} />
