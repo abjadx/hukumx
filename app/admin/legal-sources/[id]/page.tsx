@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import type { CSSProperties } from 'react';
 import { prisma } from '../../../lib/prisma';
 import DeleteLegalSourceButton from '../../../components/DeleteLegalSourceButton';
+import LegalSourceApproveProcessedButton from '../../../components/LegalSourceApproveProcessedButton';
 import LegalSourceAiProcessAllButton from '../../../components/LegalSourceAiProcessAllButton';
 
 export const runtime = 'nodejs';
@@ -712,6 +713,11 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
   const approvedCount = allArticles.filter((article) => article.reviewStatus === 'approved').length;
   const needsReviewCount = allArticles.filter((article) => article.reviewStatus === 'needs_review').length;
   const pendingCount = allArticles.filter((article) => article.reviewStatus === 'pending').length;
+  const aiProcessedReadyCount = allArticles.filter(
+    (article) =>
+      article.reviewStatus !== 'approved' &&
+      Boolean(article.articleTextClean && article.articleTextClean.trim().length > 0)
+  ).length;
   const aiUnprocessedCount = allArticles.filter((article) => article.reviewStatus !== 'approved' && !article.articleTextClean?.trim()).length;
   const unprocessedAiCount = allArticles.filter((article) => !article.articleTextClean?.trim()).length;
 
@@ -753,6 +759,12 @@ export default async function LegalSourceDetailsPage({ params, searchParams }: P
             adminKey={adminKey}
             initialRemaining={aiUnprocessedCount}
             batchSize={5}
+          />
+          <LegalSourceApproveProcessedButton
+            sourceId={source.id}
+            adminKey={adminKey}
+            initialReadyCount={aiProcessedReadyCount}
+            style={styles.primaryButton}
           />
           <form action={processLegalSourceArticlesBatch} style={{ margin: 0 }}>
             <input name="key" type="hidden" value={adminKey} />
