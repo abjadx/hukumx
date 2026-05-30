@@ -484,7 +484,7 @@ function getBestDatabaseArticleText(article: DatabaseLegalArticle) {
     return article.articleTextReviewed;
   }
 
-  return article.articleTextClean || article.articleText;
+  return '';
 }
 
 function cleanDatabaseArticleTextForContext(value: string): string {
@@ -597,6 +597,139 @@ function scoreDatabaseArticle(params: {
   return score;
 }
 
+
+// HUKUMX_CHAT_SOURCE_ROUTING_START
+type SourceForRouting = {
+  id: string;
+  titleAr: string;
+  titleEn: string | null;
+  slug: string;
+  category: string | null;
+  country: {
+    nameAr: string;
+  };
+};
+
+function scoreLegalSourceForQuestion(
+  source: SourceForRouting,
+  question: string
+): number {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+  const sourceText = normalizeArabicForSearch(
+    [source.titleAr, source.titleEn, source.slug, source.category]
+      .filter(Boolean)
+      .join(' ')
+  );
+
+  let score = 0;
+
+  if (
+    includesAny(normalizedQuestion, ['الدستور', 'دستور', 'دستوري', 'الدستوري'])
+  ) {
+    score += sourceText.includes('دستور') ? 1000 : -500;
+  }
+
+  if (
+    includesAny(normalizedQuestion, [
+      'اصول المحاكمات',
+      'أصول المحاكمات',
+      'محاكمات مدنيه',
+      'محاكمات مدنية',
+      'الاستئناف',
+      'التمييز',
+      'التبليغ',
+    ])
+  ) {
+    score += sourceText.includes('اصول المحاكمات') || sourceText.includes('محاكمات مدنيه') ? 900 : 0;
+  }
+
+  if (
+    includesAny(normalizedQuestion, ['النظام', 'نظام'])
+  ) {
+    score += sourceText.includes('نظام') ? 500 : 0;
+  }
+
+  if (
+    includesAny(normalizedQuestion, ['تعليمات', 'التعليمات'])
+  ) {
+    score += sourceText.includes('تعليمات') ? 500 : 0;
+  }
+
+  if (
+    includesAny(normalizedQuestion, ['قرار', 'قرارات'])
+  ) {
+    score += sourceText.includes('قرار') ? 500 : 0;
+  }
+
+  const questionTerms = tokenizeLegalSearchText(question);
+  for (const term of questionTerms) {
+    if (sourceText.includes(term)) {
+      score += 25;
+    }
+  }
+
+  return score;
+}
+
+async function findBestLegalSourceForQuestion(params: {
+  question: string;
+  country?: string | null;
+}): Promise<SourceForRouting | null> {
+  if (!isJordan(params.country)) {
+    return null;
+  }
+
+  const sources = (await prisma.legalSource.findMany({
+    where: {
+      isActive: true,
+      country: {
+        code: 'JO',
+      },
+      articles: {
+        some: {
+          reviewStatus: 'approved',
+          articleTextReviewed: {
+            not: null,
+          },
+        },
+      },
+    },
+    select: {
+      id: true,
+      titleAr: true,
+      titleEn: true,
+      slug: true,
+      category: true,
+      country: {
+        select: {
+          nameAr: true,
+        },
+      },
+    },
+  })) as SourceForRouting[];
+
+  if (!sources.length) {
+    return null;
+  }
+
+  const ranked = sources
+    .map((source) => ({
+      source,
+      score: scoreLegalSourceForQuestion(source, params.question),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+
+  if (!best || best.score <= 0) {
+    return null;
+  }
+
+  return best.source;
+}
+// HUKUMX_CHAT_SOURCE_ROUTING_END
+
+
 async function buildDatabaseLegalContext(params: {
   question: string;
   country?: string | null;
@@ -605,15 +738,37 @@ async function buildDatabaseLegalContext(params: {
     return '';
   }
 
+  const selectedSource = await findBestLegalSourceForQuestion({
+    question: params.question,
+    country: params.country,
+  });
+
+  if (!selectedSource) {
+    return '';
+  }
+
   const explicitArticleNumbers = extractArticleNumbers(params.question);
   const inferredArticleNumbers = inferLikelyArticleNumbers(params.question);
   const questionTerms = tokenizeLegalSearchText(params.question);
+  const normalizedQuestion = normalizeArabicForSearch(params.question);
+
+  const wantsOverview =
+    explicitArticleNumbers.length === 0 &&
+    includesAny(normalizedQuestion, [
+      'استعرض مواد',
+      'اعرض مواد',
+      'عرض مواد',
+      'مواد الدستور',
+      'مواد القانون',
+      'استعراض مواد',
+    ]);
 
   const dbArticles = (await prisma.legalArticle.findMany({
     where: {
-      legalSource: {
-        isActive: true,
-        slug: 'jordan-civil-procedure-law',
+      legalSourceId: selectedSource.id,
+      reviewStatus: 'approved',
+      articleTextReviewed: {
+        not: null,
       },
     },
     select: {
@@ -636,35 +791,43 @@ async function buildDatabaseLegalContext(params: {
     },
   })) as DatabaseLegalArticle[];
 
-  const scoredArticles = dbArticles
-    .map((article) => ({
-      article,
-      score: scoreDatabaseArticle({
-        article,
-        questionTerms,
-        explicitArticleNumbers,
-        inferredArticleNumbers,
-      }),
-    }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => {
-      if (b.score !== a.score) {
-        return b.score - a.score;
-      }
+  const approvedArticles = dbArticles.filter((article) =>
+    getBestDatabaseArticleText(article).trim()
+  );
 
-      return compareArticleNumbers(
-        a.article.articleNumber,
-        b.article.articleNumber
-      );
-    })
-    .slice(0, 6)
-    .map((item) => item.article);
+  const selectedArticles = wantsOverview
+    ? [...approvedArticles]
+        .sort((a, b) => compareArticleNumbers(a.articleNumber, b.articleNumber))
+        .slice(0, 10)
+    : approvedArticles
+        .map((article) => ({
+          article,
+          score: scoreDatabaseArticle({
+            article,
+            questionTerms,
+            explicitArticleNumbers,
+            inferredArticleNumbers,
+          }),
+        }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
 
-  if (!scoredArticles.length) {
+          return compareArticleNumbers(
+            a.article.articleNumber,
+            b.article.articleNumber
+          );
+        })
+        .slice(0, 8)
+        .map((item) => item.article);
+
+  if (!selectedArticles.length) {
     return '';
   }
 
-  return scoredArticles
+  return selectedArticles
     .map((article) => {
       const bestText = cleanDatabaseArticleTextForContext(
         getBestDatabaseArticleText(article)
@@ -1057,9 +1220,7 @@ function normalizeLegalOutput(
     sourceTitle:
       typeof parsed.sourceTitle === 'string' && parsed.sourceTitle.trim()
         ? parsed.sourceTitle
-        : useJordanRag && sourceConfidence !== 'low'
-          ? 'قانون أصول المحاكمات المدنية الأردني'
-          : '',
+        : false ? 'قانون أصول المحاكمات المدنية الأردني' : '',
     sourceArticles,
     primaryArticles,
     relatedArticles,
@@ -1180,7 +1341,7 @@ export async function POST(req: NextRequest) {
 
     const userPrompt = buildUserPrompt(body, databaseLegalContext);
 
-    const tools = useJordanRag
+    const tools = useJordanRag && !hasDatabaseLegalContext
       ? [
           {
             type: 'file_search' as const,
