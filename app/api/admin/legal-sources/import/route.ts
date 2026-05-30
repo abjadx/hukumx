@@ -122,6 +122,47 @@ function normalizeArticleNumber(value: string, fallbackIndex: number) {
   return cleaned || String(fallbackIndex + 1);
 }
 
+function getArticleSortKey(articleNumber: string, fallbackIndex: number) {
+  const normalized = convertArabicDigits(articleNumber || '')
+    .replace(/^المادة\s*/u, '')
+    .replace(/^مادة\s*/u, '')
+    .replace(/[():：]/g, '')
+    .trim();
+
+  const firstNumber = normalized.match(/\d+/)?.[0];
+
+  if (firstNumber) {
+    return {
+      type: 0,
+      number: Number(firstNumber),
+      text: normalized,
+      fallbackIndex,
+    };
+  }
+
+  return {
+    type: 1,
+    number: Number.MAX_SAFE_INTEGER,
+    text: normalized || articleNumber || '',
+    fallbackIndex,
+  };
+}
+
+function sortParsedArticlesByNumber(articles: ParsedArticle[]) {
+  return [...articles].sort((a, b) => {
+    const keyA = getArticleSortKey(a.articleNumber, 0);
+    const keyB = getArticleSortKey(b.articleNumber, 0);
+
+    if (keyA.type !== keyB.type) return keyA.type - keyB.type;
+    if (keyA.number !== keyB.number) return keyA.number - keyB.number;
+
+    const textCompare = keyA.text.localeCompare(keyB.text, 'ar', { numeric: true });
+    if (textCompare !== 0) return textCompare;
+
+    return 0;
+  });
+}
+
 function makeUniqueArticleNumbers(articles: ParsedArticle[]) {
   const used = new Map<string, number>();
 
@@ -165,7 +206,7 @@ function splitArticlesHeuristically(text: string): ParsedArticle[] {
       }
     }
 
-    return makeUniqueArticleNumbers(articles);
+    return makeUniqueArticleNumbers(sortParsedArticlesByNumber(articles));
   }
 
   const numberedLineRegex = /(?:^|\n)\s*([0-9٠-٩]{1,4})\s*[\).\-/]\s+/g;
@@ -190,7 +231,7 @@ function splitArticlesHeuristically(text: string): ParsedArticle[] {
       }
     }
 
-    return makeUniqueArticleNumbers(articles);
+    return makeUniqueArticleNumbers(sortParsedArticlesByNumber(articles));
   }
 
   if (cleaned.length > 20) {
@@ -279,7 +320,7 @@ function normalizeParsedLegislation(
       typeof parsed.sourceType === 'string' && parsed.sourceType.trim()
         ? parsed.sourceType.trim()
         : fallbackType,
-    articles: makeUniqueArticleNumbers(articles),
+    articles: makeUniqueArticleNumbers(sortParsedArticlesByNumber(articles)),
   };
 }
 
@@ -305,6 +346,7 @@ async function parseLegislationWithAI(params: {
 مهمتك:
 - قراءة نص تشريع عربي مستخرج من PDF أو TXT.
 - تمييز المواد القانونية وفصلها إلى مواد مستقلة.
+- ترتيب المواد تصاعديًا حسب رقم المادة: 1 ثم 2 ثم 3 وهكذا، حتى لو ظهر النص المستخرج بترتيب مختلط.
 - الحفاظ على نص المادة كاملًا قدر الإمكان.
 - تنظيف أخطاء التنسيق البسيطة فقط مثل فواصل الأسطر غير المنطقية والمسافات الزائدة.
 - عدم تلخيص المواد.
@@ -512,6 +554,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const fallbackArticles = splitArticlesHeuristically(extractedText);
+
     const aiParsed = await parseLegislationWithAI({
       titleAr,
       legislationType,
@@ -519,16 +563,22 @@ export async function POST(req: NextRequest) {
       text: extractedText,
     });
 
-    const fallbackArticles = splitArticlesHeuristically(extractedText);
+    const useAiParser = Boolean(
+      aiParsed &&
+        aiParsed.articles.length > 0 &&
+        aiParsed.articles.length >= Math.max(1, Math.ceil(fallbackArticles.length * 0.85))
+    );
 
-    const parsedLegislation =
-      aiParsed && aiParsed.articles.length >= Math.min(2, fallbackArticles.length || 1)
-        ? aiParsed
-        : {
-            sourceTitle: titleAr,
-            sourceType: legislationType,
-            articles: fallbackArticles,
-          };
+    const parsedLegislation = useAiParser && aiParsed
+      ? {
+          ...aiParsed,
+          articles: sortParsedArticlesByNumber(aiParsed.articles),
+        }
+      : {
+          sourceTitle: titleAr,
+          sourceType: legislationType,
+          articles: fallbackArticles,
+        };
 
     if (!parsedLegislation.articles.length) {
       return NextResponse.json(
@@ -585,7 +635,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const articlesToInsert = makeUniqueArticleNumbers(parsedLegislation.articles)
+    const orderedArticles = makeUniqueArticleNumbers(
+      sortParsedArticlesByNumber(parsedLegislation.articles)
+    );
+
+    const articlesToInsert = orderedArticles
       .map((article) => ({
         legalSourceId: legalSource.id,
         articleNumber: article.articleNumber,
@@ -596,9 +650,9 @@ export async function POST(req: NextRequest) {
         reviewNotes: [
           `تم إدخال هذه المادة من ملف ${fileValue.name}.`,
           `نوع التشريع: ${LEGISLATION_TYPES[legislationType]}.`,
-          aiParsed
-            ? 'تم تقسيم وتنظيف النص مبدئيًا بالذكاء الصناعي ويحتاج اعتمادًا بشريًا.'
-            : 'تم تقسيم النص آليًا بدون AI أو بعد تعذر قراءة نتيجة AI ويحتاج مراجعة بشرية.',
+          useAiParser
+            ? 'تم تقسيم وتنظيف النص مبدئيًا بالذكاء الصناعي وترتيب المواد تصاعديًا حسب رقم المادة. يحتاج اعتمادًا بشريًا.'
+            : 'تم تقسيم النص آليًا وترتيب المواد تصاعديًا حسب رقم المادة بعد تعذر أو عدم كفاية نتيجة AI. يحتاج مراجعة بشرية.',
           article.notes ? `ملاحظة: ${article.notes}` : '',
         ]
           .filter(Boolean)
@@ -621,7 +675,7 @@ export async function POST(req: NextRequest) {
         fileName: fileValue.name,
         extractedTextLength: extractedText.length,
         insertedArticlesCount: articlesToInsert.length,
-        parsingMode: aiParsed ? 'AI' : 'AUTO_SPLIT',
+        parsingMode: useAiParser ? 'AI_ORDERED' : 'AUTO_SPLIT_ORDERED',
         reviewStatus: 'needs_review',
         preview: articlesToInsert.slice(0, 5).map((article) => ({
           articleNumber: article.articleNumber,
