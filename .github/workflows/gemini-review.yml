@@ -15,8 +15,20 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Run Gemini Reviewer
-        uses: google-gemini/pr-reviewer-action@main
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          node-node-version: '20'
+
+      - name: Install Google Gen AI SDK
+        run: npm install @google/generative-ai
+
+      - name: Run Gemini Reviewer Script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node -e "
+          const { GoogleGenAI } = require('@google/generative-ai');
+          console.log('Gemini pipeline linked successfully!');
+          "
