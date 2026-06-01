@@ -12,14 +12,11 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # نستخدم هنا أداة مجتمعية جاهزة لربط Gemini بمراجعة الـ PR
-      - name: Gemini PR Reviewer
-        uses: google-gemini/pr-reviewer-action@v1 # تأكد من استخدام أحدث إصدار متاح في الـ Marketplace
+      - name: Run Gemini Reviewer
+        uses: google-gemini/pr-reviewer-action@main
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          model: 'gemini-1.5-pro' # أو يمكن استخدام gemini-1.5-flash لسرعة أكبر
-          focus_areas: 'security, performance, bugs' # الأمور التي تركز عليها المراجعة
