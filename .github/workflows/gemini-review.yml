@@ -14,21 +14,51 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # لجلب الفروقات بين الفروع بالكامل
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-node-version: '20'
+          node-version: '20' # تم تصحيح الكلمة هنا
 
       - name: Install Google Gen AI SDK
         run: npm install @google/generative-ai
 
-      - name: Run Gemini Reviewer Script
+      - name: Fetch PR Code Diff and Review with Gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node -e "
           const { GoogleGenAI } = require('@google/generative-ai');
-          console.log('Gemini pipeline linked successfully!');
+          const execSync = require('child_process').execSync;
+
+          async function run() {
+            try {
+              // 1. جلب الفروقات البرمجية للكود المرفوع في الـ PR
+              const diff = execSync('git diff origin/${{ github.base_ref }} HEAD').toString();
+              
+              if (!diff) {
+                console.log('No code changes detected.');
+                return;
+              }
+
+              // 2. إعداد اتصال Gemini
+              const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+              const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+              const prompt = 'أنت مطور برامج محترف ومراجع أكواد ذكي. قم بمراجعة الفروقات البرمجية التالية (Code Diff) واكتشف الأخطاء، الثغرات الأمنية، ومشاكل الأداء، وقدم اقتراحات لتحسين الكود باللغة العربية:\n\n' + diff;
+
+              console.log('Sending code diff to Gemini...');
+              const result = await model.generateContent(prompt);
+              const reviewText = result.response.text();
+
+              // 3. طباعة المراجعة في لوحة التحكم للتأكد
+              console.log('\n=== Gemini Review Output ===\n', reviewText);
+            } catch (error) {
+              console.error('Error during Gemini review:', error);
+            }
+          }
+          run();
           "
