@@ -22,9 +22,62 @@ import ContractBusinessIntakeForm from './components/ContractBusinessIntakeForm'
 
 type SourceConfidence = 'high' | 'medium' | 'low';
 
+type AnswerMode =
+  | 'GENERAL_USER'
+  | 'LAWYER'
+  | 'JUDGE'
+  | 'LAW_STUDENT'
+  | 'BUSINESS'
+  | 'GOVERNMENT';
+
+const ANSWER_MODE_OPTIONS: {
+  code: AnswerMode;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  {
+    code: 'GENERAL_USER',
+    label: 'مستخدم عادي',
+    icon: '👤',
+    description: 'شرح بسيط وعملي بدون تعقيد.',
+  },
+  {
+    code: 'LAWYER',
+    label: 'محامٍ',
+    icon: '⚖️',
+    description: 'تحليل مهني وتكييف قانوني.',
+  },
+  {
+    code: 'JUDGE',
+    label: 'قاضٍ',
+    icon: '👨‍⚖️',
+    description: 'عرض محايد لشروط التطبيق.',
+  },
+  {
+    code: 'LAW_STUDENT',
+    label: 'طالب قانون',
+    icon: '📚',
+    description: 'شرح تعليمي للمفاهيم القانونية.',
+  },
+  {
+    code: 'BUSINESS',
+    label: 'شركة / رجل أعمال',
+    icon: '🏢',
+    description: 'تركيز على المخاطر والخطوات العملية.',
+  },
+  {
+    code: 'GOVERNMENT',
+    label: 'جهة حكومية',
+    icon: '🏛️',
+    description: 'تركيز على الاختصاص والإجراء.',
+  },
+];
+
 export default function Home() {
   const [country, setCountry] = useState('');
   const [caseType, setCaseType] = useState('');
+  const [answerMode, setAnswerMode] = useState<AnswerMode>('GENERAL_USER');
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [lawyerSummary, setLawyerSummary] = useState('');
@@ -101,6 +154,7 @@ export default function Home() {
   const startNewQuestion = () => {
     setCountry('');
     setCaseType('');
+    setAnswerMode('GENERAL_USER');
     setQuestion('');
     resetAnswerOutput();
     setLoading(false);
@@ -161,6 +215,7 @@ export default function Home() {
           question: finalQuestion,
           country: selectedCountry?.name || 'غير محدد',
           caseType: selectedCaseType?.name || 'غير محدد',
+          answerMode,
           intakeType: submittedIntakeType,
           judgmentIntakeData: judgmentData || null,
           contractIntakeData: contractData || null,
@@ -327,6 +382,64 @@ export default function Home() {
               setFormError('');
             }}
           />
+
+          <section className="bg-slate-700/70 border border-slate-600 rounded-2xl p-5 text-right" dir="rtl">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-slate-100 font-bold text-lg">
+                  طبيعة الإجابة
+                </h3>
+                <p className="text-slate-300 text-sm mt-1">
+                  اختر طريقة عرض الجواب حسب صفة المستخدم.
+                </p>
+              </div>
+
+              <span className="bg-amber-500 text-black text-sm font-bold rounded-full px-3 py-1">
+                اختياري
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {ANSWER_MODE_OPTIONS.map((option) => {
+                const isSelected = answerMode === option.code;
+
+                return (
+                  <button
+                    key={option.code}
+                    type="button"
+                    onClick={() => {
+                      setAnswerMode(option.code);
+                      setFormError('');
+                    }}
+                    className={`rounded-xl border px-4 py-3 text-right transition ${
+                      isSelected
+                        ? 'border-amber-400 bg-amber-500 text-black shadow-lg shadow-amber-500/20'
+                        : 'border-slate-500 bg-slate-600/60 text-slate-100 hover:border-amber-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span
+                        className={`text-sm font-bold ${
+                          isSelected ? 'text-black' : 'text-slate-100'
+                        }`}
+                      >
+                        {option.label}
+                      </span>
+                      <span className="text-xl">{option.icon}</span>
+                    </div>
+
+                    <p
+                      className={`mt-2 text-xs leading-5 ${
+                        isSelected ? 'text-black/80' : 'text-slate-300'
+                      }`}
+                    >
+                      {option.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
           <QuestionBox
             question={question}

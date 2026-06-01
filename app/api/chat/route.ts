@@ -908,7 +908,7 @@ function inferLikelyArticleNumbers(question: string): string[] {
   }
 
   if (isTheftPenaltyQuestion(question)) {
-    inferredArticles.push('407', '399', '400', '401', '402', '403', '404', '405', '406');
+    inferredArticles.push(...getTheftArticlePriority(question));
   }
 
   if (
@@ -2344,6 +2344,22 @@ function getLegalIntentSearchHints(params: {
     );
   }
 
+  if (isTheftQuestion(params.question)) {
+    hints.push(
+      'سرقة',
+      'السرقة',
+      'أخذ مال الغير',
+      'دون رضاه',
+      'ليل',
+      'ليلاً',
+      'منزل',
+      'مكان مأهول',
+      'السرقة بالخلع والكسر',
+      'عقوبة السرقة',
+      'الحبس من سنة إلى ثلاث سنوات'
+    );
+  }
+
   if (params.goal === 'PENALTY') {
     hints.push('عقوبة', 'جزاء', 'أثر قانوني', 'مسؤولية', 'حبس');
   }
@@ -2399,10 +2415,10 @@ function isFraudPenaltyQuestion(question: string): boolean {
   return mentionsFraud && mentionsPenaltyOrCriminalLaw;
 }
 
-function isTheftPenaltyQuestion(question: string): boolean {
+function isTheftQuestion(question: string): boolean {
   const normalizedQuestion = normalizeArabicForSearch(question);
 
-  const mentionsTheft = includesAny(normalizedQuestion, [
+  return includesAny(normalizedQuestion, [
     'سرقه',
     'سرقة',
     'السرقه',
@@ -2413,27 +2429,127 @@ function isTheftPenaltyQuestion(question: string): boolean {
     'نشل',
     'الاخذ',
     'اخذ مال الغير',
+    'مقتنيات',
+    'مسروقات',
   ]);
+}
 
-  const mentionsPenaltyOrCriminalLaw = includesAny(normalizedQuestion, [
-    'عقوبه',
-    'عقوبة',
-    'جزاء',
-    'يعاقب',
-    'الحبس',
-    'حبس',
-    'غرامه',
-    'غرامة',
-    'قانون العقوبات',
-    'العقوبات',
-    'جريمه',
-    'جريمة',
-    'جنحه',
-    'جنحة',
-    'جناية',
+function hasNightTheftContext(question: string): boolean {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+
+  return includesAny(normalizedQuestion, [
+    'ليلا',
+    'ليل',
+    'بالليل',
+    'اثناء الليل',
+    'أثناء الليل',
+    'ظرف الليل',
   ]);
+}
 
-  return mentionsTheft && mentionsPenaltyOrCriminalLaw;
+function hasHomeOrInhabitedPlaceTheftContext(question: string): boolean {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+
+  return includesAny(normalizedQuestion, [
+    'منزل',
+    'المنزل',
+    'بيت',
+    'البيت',
+    'مسكن',
+    'المسكن',
+    'مكان ماهول',
+    'مكان مأهول',
+    'مكان للسكن',
+    'شقه',
+    'شقة',
+    'دار',
+  ]);
+}
+
+function hasBreakingOrForcedEntryTheftContext(question: string): boolean {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+
+  return includesAny(normalizedQuestion, [
+    'كسر',
+    'بالكسر',
+    'خلع',
+    'بالخلع',
+    'نقب',
+    'تسلق',
+    'تسور',
+    'كسر الباب',
+    'كسر الشباك',
+    'فتحها باله',
+    'آلة مخصوصة',
+    'اله مخصوصه',
+    'مفتاح مصطنع',
+    'مفاتيح مصطنعه',
+  ]);
+}
+
+function hasMultipleWeaponOrViolenceTheftContext(question: string): boolean {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+
+  return includesAny(normalizedQuestion, [
+    'شخصين',
+    'اكثر من شخص',
+    'أكثر من شخص',
+    'بالاشتراك',
+    'مشتركين',
+    'سلاح',
+    'مسلح',
+    'تهديد',
+    'هدد',
+    'عنف',
+    'ضرب',
+    'جروح',
+    'رضوض',
+  ]);
+}
+
+function getTheftArticlePriority(question: string): string[] {
+  const priority: string[] = [];
+  const night = hasNightTheftContext(question);
+  const homeOrInhabited = hasHomeOrInhabitedPlaceTheftContext(question);
+  const breaking = hasBreakingOrForcedEntryTheftContext(question);
+  const weaponOrViolenceOrMultiple = hasMultipleWeaponOrViolenceTheftContext(question);
+
+  if (breaking) {
+    priority.push('404');
+  }
+
+  if (night && homeOrInhabited) {
+    priority.push('406');
+  }
+
+  if (weaponOrViolenceOrMultiple && night) {
+    priority.push('401', '400');
+  }
+
+  if (weaponOrViolenceOrMultiple) {
+    priority.push('401');
+  }
+
+  priority.push('399');
+
+  if (!priority.includes('407')) {
+    priority.push('407');
+  }
+
+  return uniqueStrings([
+    ...priority,
+    '400',
+    '401',
+    '402',
+    '403',
+    '404',
+    '405',
+    '406',
+  ]);
+}
+
+function isTheftPenaltyQuestion(question: string): boolean {
+  return isTheftQuestion(question);
 }
 
 function getStrictAllowedArticleNumbersForDirectIntent(
@@ -2443,10 +2559,8 @@ function getStrictAllowedArticleNumbersForDirectIntent(
     (hint) => hint.key === 'JORDAN_PENAL_CODE_FRAUD_ARTICLE_417'
   );
 
-  const hasTheftArticleResolver = legalIntent.directArticleHints.some(
-    (hint) =>
-      hint.key === 'JORDAN_PENAL_CODE_THEFT_DEFINITION_399' ||
-      hint.key === 'JORDAN_PENAL_CODE_SIMPLE_THEFT_PENALTY_407'
+  const hasTheftArticleResolver = legalIntent.directArticleHints.some((hint) =>
+    hint.key.startsWith('JORDAN_PENAL_CODE_THEFT_')
   );
 
   if (hasFraudArticleResolver) {
@@ -2519,35 +2633,79 @@ function detectDirectLegalArticleHints(params: {
     });
   }
 
-  if (
-    isJordan(params.country) &&
-    isTheftPenaltyQuestion(params.question) &&
-    (params.domain === 'CRIMINAL' ||
-      params.goal === 'PENALTY' ||
-      params.requestedSource?.key === 'JORDAN_CRIMINAL_LAW')
-  ) {
+  if (isJordan(params.country) && isTheftPenaltyQuestion(params.question)) {
+    const theftArticlePriority = getTheftArticlePriority(params.question);
+
+    for (const articleNumber of theftArticlePriority) {
+      if (articleNumber === '406') {
+        hints.push({
+          key: 'JORDAN_PENAL_CODE_THEFT_NIGHT_HOME_406',
+          sourceKey: 'JORDAN_CRIMINAL_LAW',
+          sourceTitleHint: 'قانون العقوبات الأردني',
+          articleNumber: '406',
+          labelAr: 'السرقة ليلاً في مكان مأهول أو مكان للعبادة',
+          reason:
+            'السؤال يتحدث عن دخول ليلاً إلى منزل أو مكان مأهول وسرقة مقتنيات؛ المادة 406 هي المرشح المباشر لهذا الظرف عند عدم ذكر كسر أو سلاح أو عنف أو تعدد فاعلين.',
+          keywords: [
+            'الوقت ليلا',
+            'الوقت ليلاً',
+            'السارق واحدا',
+            'السارق واحداً',
+            'مكان ماهول',
+            'مكان مأهول',
+            'مكان للعباده',
+            'مكان للعبادة',
+            'الحبس من سنه الى ثلاث سنوات',
+            'الحبس من سنة إلى ثلاث سنوات',
+          ],
+        });
+      }
+
+      if (articleNumber === '404') {
+        hints.push({
+          key: 'JORDAN_PENAL_CODE_THEFT_BREAKING_404',
+          sourceKey: 'JORDAN_CRIMINAL_LAW',
+          sourceTitleHint: 'قانون العقوبات الأردني',
+          articleNumber: '404',
+          labelAr: 'السرقة بالخلع أو الكسر',
+          reason:
+            'إذا تضمنت الواقعة خلعاً أو كسراً أو تسلقاً أو فتحاً بآلة مخصوصة، فالمادة 404 تصبح من المواد المباشرة في توصيف السرقة.',
+          keywords: [
+            'السرقة بالخلع والكسر',
+            'نقب حائطها',
+            'تسلقه',
+            'كسر بابها',
+            'كسر شباكها',
+            'آلة مخصوصة',
+            'مفاتيح مصطنعة',
+            'أماكن مقفلة',
+          ],
+        });
+      }
+
+      if (articleNumber === '401') {
+        hints.push({
+          key: 'JORDAN_PENAL_CODE_THEFT_AGGRAVATED_401',
+          sourceKey: 'JORDAN_CRIMINAL_LAW',
+          sourceTitleHint: 'قانون العقوبات الأردني',
+          articleNumber: '401',
+          labelAr: 'السرقة المقترنة بظروف مشددة',
+          reason:
+            'إذا اقترنت السرقة بظروف مثل الليل وتعدد الفاعلين والسلاح أو العنف، فالمادة 401 تكون من مواد السرقة المشددة ذات الصلة.',
+          keywords: [
+            'تقع السرقة ليلا',
+            'تقع السرقة ليلاً',
+            'بفعل شخصين او اكثر',
+            'بفعل شخصين أو أكثر',
+            'السلاح',
+            'العنف',
+            'الاشغال الشاقة المؤقتة',
+          ],
+        });
+      }
+    }
+
     hints.push(
-      {
-        key: 'JORDAN_PENAL_CODE_SIMPLE_THEFT_PENALTY_407',
-        sourceKey: 'JORDAN_CRIMINAL_LAW',
-        sourceTitleHint: 'قانون العقوبات الأردني',
-        articleNumber: '407',
-        labelAr: 'عقوبة السرقة البسيطة',
-        reason:
-          'السؤال يتحدث عن عقوبة السرقة في قانون العقوبات الأردني، والمادة المباشرة لعقوبة السرقة البسيطة هي المادة 407، مع ضرورة عرض المواد المشددة عند وجود ظرف مشدد.',
-        keywords: [
-          'سرقة',
-          'السرقة',
-          'سرقه',
-          'السرقه',
-          'سرقات',
-          'نشل',
-          'يعاقب',
-          'الحبس',
-          'من غير السرقات المبينة',
-          'الأخذ',
-        ],
-      },
       {
         key: 'JORDAN_PENAL_CODE_THEFT_DEFINITION_399',
         sourceKey: 'JORDAN_CRIMINAL_LAW',
@@ -2555,7 +2713,7 @@ function detectDirectLegalArticleHints(params: {
         articleNumber: '399',
         labelAr: 'تعريف السرقة',
         reason:
-          'المادة 399 هي مادة تعريف السرقة ويجب استحضارها عند السؤال عن السرقة حتى لا يتم ربط السؤال بمواد عامة بعيدة.',
+          'المادة 399 هي مادة تعريف السرقة ويجب استحضارها عند السؤال عن واقعة سرقة حتى لا يتم ربط السؤال بمواد عامة بعيدة.',
         keywords: [
           'سرقة',
           'السرقة',
@@ -2567,6 +2725,27 @@ function detectDirectLegalArticleHints(params: {
           'دون رضاه',
           'أخذ المال',
           'اخذ المال',
+        ],
+      },
+      {
+        key: 'JORDAN_PENAL_CODE_SIMPLE_THEFT_PENALTY_407',
+        sourceKey: 'JORDAN_CRIMINAL_LAW',
+        sourceTitleHint: 'قانون العقوبات الأردني',
+        articleNumber: '407',
+        labelAr: 'عقوبة السرقة البسيطة',
+        reason:
+          'المادة 407 تبقى مرجعاً احتياطياً للسرقة البسيطة إذا لم تثبت الظروف المشددة الخاصة كالدخول ليلاً إلى مكان مأهول أو الخلع والكسر أو العنف والسلاح.',
+        keywords: [
+          'سرقة',
+          'السرقة',
+          'سرقه',
+          'السرقه',
+          'سرقات',
+          'نشل',
+          'يعاقب',
+          'الحبس',
+          'من غير السرقات المبينة',
+          'الأخذ',
         ],
       }
     );
