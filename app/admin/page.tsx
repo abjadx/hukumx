@@ -449,4 +449,5 @@ export default async function AdminHomePage({ searchParams }: PageProps) {
       </div>
     </main>
   );
+  );
 }
