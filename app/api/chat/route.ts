@@ -907,6 +907,10 @@ function inferLikelyArticleNumbers(question: string): string[] {
     inferredArticles.push('417');
   }
 
+  if (isTheftPenaltyQuestion(question)) {
+    inferredArticles.push('407', '399', '400', '401', '402', '403', '404', '405', '406');
+  }
+
   if (
     includesAny(normalizedQuestion, [
       'مده الاستئناف',
@@ -1880,6 +1884,12 @@ function detectRequestedLegalSource(question: string): RequestedLegalSource | nu
         'الاحتيال',
         'طرق احتيالية',
         'نصب',
+        'سرقه',
+        'سرقة',
+        'السرقه',
+        'السرقة',
+        'سرقات',
+        'نشل',
       ],
       strict: true,
     },
@@ -1975,6 +1985,12 @@ function detectLegalDomain(
       'احتياليه',
       'احتيالية',
       'نصب',
+      'سرقه',
+      'سرقة',
+      'السرقه',
+      'السرقة',
+      'سرقات',
+      'نشل',
     ])
   ) {
     return 'CRIMINAL';
@@ -2383,6 +2399,43 @@ function isFraudPenaltyQuestion(question: string): boolean {
   return mentionsFraud && mentionsPenaltyOrCriminalLaw;
 }
 
+function isTheftPenaltyQuestion(question: string): boolean {
+  const normalizedQuestion = normalizeArabicForSearch(question);
+
+  const mentionsTheft = includesAny(normalizedQuestion, [
+    'سرقه',
+    'سرقة',
+    'السرقه',
+    'السرقة',
+    'سرقات',
+    'السارق',
+    'سارق',
+    'نشل',
+    'الاخذ',
+    'اخذ مال الغير',
+  ]);
+
+  const mentionsPenaltyOrCriminalLaw = includesAny(normalizedQuestion, [
+    'عقوبه',
+    'عقوبة',
+    'جزاء',
+    'يعاقب',
+    'الحبس',
+    'حبس',
+    'غرامه',
+    'غرامة',
+    'قانون العقوبات',
+    'العقوبات',
+    'جريمه',
+    'جريمة',
+    'جنحه',
+    'جنحة',
+    'جناية',
+  ]);
+
+  return mentionsTheft && mentionsPenaltyOrCriminalLaw;
+}
+
 function getStrictAllowedArticleNumbersForDirectIntent(
   legalIntent: LegalIntent
 ): string[] {
@@ -2390,8 +2443,18 @@ function getStrictAllowedArticleNumbersForDirectIntent(
     (hint) => hint.key === 'JORDAN_PENAL_CODE_FRAUD_ARTICLE_417'
   );
 
+  const hasTheftArticleResolver = legalIntent.directArticleHints.some(
+    (hint) =>
+      hint.key === 'JORDAN_PENAL_CODE_THEFT_DEFINITION_399' ||
+      hint.key === 'JORDAN_PENAL_CODE_SIMPLE_THEFT_PENALTY_407'
+  );
+
   if (hasFraudArticleResolver) {
     return ['417', '240', '419', '438', '439'];
+  }
+
+  if (hasTheftArticleResolver) {
+    return ['407', '399', '400', '401', '402', '403', '404', '405', '406'];
   }
 
   return [];
@@ -2454,6 +2517,59 @@ function detectDirectLegalArticleHints(params: {
         'الغرامة',
       ],
     });
+  }
+
+  if (
+    isJordan(params.country) &&
+    isTheftPenaltyQuestion(params.question) &&
+    (params.domain === 'CRIMINAL' ||
+      params.goal === 'PENALTY' ||
+      params.requestedSource?.key === 'JORDAN_CRIMINAL_LAW')
+  ) {
+    hints.push(
+      {
+        key: 'JORDAN_PENAL_CODE_SIMPLE_THEFT_PENALTY_407',
+        sourceKey: 'JORDAN_CRIMINAL_LAW',
+        sourceTitleHint: 'قانون العقوبات الأردني',
+        articleNumber: '407',
+        labelAr: 'عقوبة السرقة البسيطة',
+        reason:
+          'السؤال يتحدث عن عقوبة السرقة في قانون العقوبات الأردني، والمادة المباشرة لعقوبة السرقة البسيطة هي المادة 407، مع ضرورة عرض المواد المشددة عند وجود ظرف مشدد.',
+        keywords: [
+          'سرقة',
+          'السرقة',
+          'سرقه',
+          'السرقه',
+          'سرقات',
+          'نشل',
+          'يعاقب',
+          'الحبس',
+          'من غير السرقات المبينة',
+          'الأخذ',
+        ],
+      },
+      {
+        key: 'JORDAN_PENAL_CODE_THEFT_DEFINITION_399',
+        sourceKey: 'JORDAN_CRIMINAL_LAW',
+        sourceTitleHint: 'قانون العقوبات الأردني',
+        articleNumber: '399',
+        labelAr: 'تعريف السرقة',
+        reason:
+          'المادة 399 هي مادة تعريف السرقة ويجب استحضارها عند السؤال عن السرقة حتى لا يتم ربط السؤال بمواد عامة بعيدة.',
+        keywords: [
+          'سرقة',
+          'السرقة',
+          'سرقه',
+          'السرقه',
+          'أخذ مال الغير',
+          'اخذ مال الغير',
+          'مال الغير المنقول',
+          'دون رضاه',
+          'أخذ المال',
+          'اخذ المال',
+        ],
+      }
+    );
   }
 
   return hints;
