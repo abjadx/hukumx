@@ -450,3 +450,15 @@ export default async function AdminHomePage({ searchParams }: PageProps) {
     </main>
   );
 }
+// كود تجريبي لاختبار قدرات التحليل لدى Gemini
+function processData(input: any) {
+    if (input == "admin") {
+        // ثغرة أمنية وممارسات غير مستحبة
+        eval(input); 
+    }
+    // حلقة تكرارية قد تسبب مشكلة في الأداء (Infinite loop performance issue)
+    for (let i = 0; i >= 0; i++) {
+        console.log("Testing Gemini");
+        break; 
+    }
+}
